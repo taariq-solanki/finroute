@@ -1,0 +1,30 @@
+default_agent: personal_finance_agent
+agents:
+  personal_finance_agent:
+    name: personal_finance_agent
+    entrypoint: /Users/cloudageglobal/Downloads/MultiAgent/SourceCode/main.py
+    platform: linux/arm64
+    container_runtime: none
+    aws:
+      execution_role: arn:aws:iam::015337708931:role/AmazonBedrockAgentCoreSDKRuntime-eu-north-1
+      execution_role_auto_create: false
+      account: 015337708931
+      region: eu-north-1
+      ecr_repository: 015337708931.dkr.ecr.eu-north-1.amazonaws.com/bedrock-agentcore-personal_finance_agent
+      ecr_auto_create: false
+      network_configuration:
+        network_mode: PUBLIC
+      protocol_configuration:
+        server_protocol: HTTP
+      observability:
+        enabled: true
+    bedrock_agentcore:
+      agent_id: personal_finance_agent-mYf9CY3eON
+      agent_arn: arn:aws:bedrock-agentcore:eu-north-1:015337708931:runtime/personal_finance_agent-mYf9CY3eON
+      agent_session_id: null
+    codebuild:
+      project_name: bedrock-agentcore-personal_finance_agent-builder
+      execution_role: arn:aws:iam::015337708931:role/AmazonBedrockAgentCoreSDKCodeBuild-eu-north-1-5d12c2867b
+      source_bucket: bedrock-agentcore-codebuild-sources-015337708931-eu-north-1
+    authorizer_configuration: null
+    oauth_configuration: null
