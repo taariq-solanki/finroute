@@ -78,40 +78,40 @@ export async function sendMessage(
       buffer = lines.pop() || "";
 
       for (const line of lines) {
+        let data = "";
+
         if (line.startsWith("data: ")) {
-          let data = line.slice(6).replace(/"/g, "");
+          data = line.slice(6).replace(/"/g, "");
           if (data === "[DONE]") {
             onDone();
             return;
           }
+        } else if (line.trim()) {
+          data = line.replace(/"/g, "");
+        } else {
+          continue;
+        }
 
-          // Track thinking state across chunks
-          if (data.includes("<thinking>")) {
-            insideThinking = true;
-          }
-          if (data.includes("</thinking>")) {
-            insideThinking = false;
-            data = data.replace(/<\/thinking>/gi, "");
-          }
+        // Track thinking state across all chunks
+        if (data.includes("<thinking>")) {
+          insideThinking = true;
+        }
+        if (data.includes("</thinking>")) {
+          insideThinking = false;
+          data = data.replace(/<\/thinking>/gi, "");
+        }
 
-          // Skip content inside thinking blocks
-          if (insideThinking) {
-            continue;
-          }
+        // Skip content inside thinking blocks
+        if (insideThinking) {
+          continue;
+        }
 
-          // Clean any residual thinking tags
-          data = stripThinkingTags(data);
+        // Clean any residual thinking tags
+        data = stripThinkingTags(data);
 
-          if (data.trim()) {
-            fullResponse += data;
-            onChunk(data);
-          }
-        } else if (line.trim() && !insideThinking) {
-          const text = line.replace(/"/g, "");
-          const cleaned = stripThinkingTags(text);
-          if (cleaned.trim()) {
-            onChunk("\n" + cleaned);
-          }
+        if (data.trim()) {
+          fullResponse += data;
+          onChunk(data);
         }
       }
     }
@@ -126,9 +126,11 @@ export async function sendMessage(
  * Generate a unique session ID (must be at least 33 characters for AgentCore).
  */
 export function generateSessionId(): string {
-  return (
-    Math.random().toString(36).substring(2, 15) +
-    Math.random().toString(36).substring(2, 15) +
-    Math.random().toString(36).substring(2, 15)
-  );
+  const seg = () => Math.random().toString(36).substring(2);
+  let id = seg() + seg() + seg() + seg();
+  // Ensure minimum 33 characters
+  while (id.length < 36) {
+    id += Math.random().toString(36).substring(2);
+  }
+  return id.substring(0, 36);
 }

@@ -2,15 +2,13 @@
 # ============================================================================
 # Financial Advisor — Deploy Frontend to AWS Amplify
 # ============================================================================
-# This script deploys the Next.js frontend to AWS Amplify Hosting
-# connected to AWS CodeCommit.
+# Builds the Next.js frontend as a static export and deploys to AWS Amplify
+# using manual deployment (no CodeCommit dependency).
 #
 # Prerequisites:
 #   - AWS CLI configured with eu-north-1 region
-#   - Git credential helper configured for CodeCommit:
-#       git config --global credential.helper '!aws codecommit credential-helper $@'
-#       git config --global credential.UseHttpPath true
 #   - Node.js installed
+#   - .venv activated (for boto3)
 #
 # Usage:
 #   chmod +x deploy-frontend.sh
@@ -21,177 +19,131 @@ set -e
 
 PROJECT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REGION="eu-north-1"
-REPO_NAME="finance-advisor-frontend"
 APP_NAME="finance-advisor-ui"
-
-# AgentCore + Cognito config
-AGENTCORE_ENDPOINT="https://bedrock-agentcore.eu-north-1.amazonaws.com/runtimes/arn%3Aaws%3Abedrock-agentcore%3Aeu-north-1%3A015337708931%3Aruntime%2Fpersonal_finance_agent-mYf9CY3eON/invocations"
-COGNITO_USER_POOL_ID="eu-north-1_21eZXl8aO"
-COGNITO_CLIENT_ID="m7cbioiiuohbsj6eicmqu1t84"
 
 echo "============================================"
 echo "  Frontend Deployment to AWS Amplify"
 echo "============================================"
 echo ""
 
-# ----------------------------------------------------------------------------
-# Step 1: Create CodeCommit repo (if not exists)
-# ----------------------------------------------------------------------------
-echo "━━━ Step 1: CodeCommit Repository ━━━"
+cd "$PROJECT_DIR"
+source .venv/bin/activate
 
-REPO_URL=$(aws codecommit get-repository --repository-name "$REPO_NAME" --region "$REGION" --query 'repositoryMetadata.cloneUrlHttp' --output text 2>/dev/null || echo "")
+# Read config from .env.local
+AGENTCORE_ENDPOINT=$(grep NEXT_PUBLIC_AGENTCORE_ENDPOINT "$PROJECT_DIR/frontend/.env.local" | cut -d= -f2-)
+COGNITO_USER_POOL_ID=$(grep NEXT_PUBLIC_COGNITO_USER_POOL_ID "$PROJECT_DIR/frontend/.env.local" | cut -d= -f2)
+COGNITO_CLIENT_ID=$(grep NEXT_PUBLIC_COGNITO_CLIENT_ID "$PROJECT_DIR/frontend/.env.local" | cut -d= -f2)
 
-if [ -z "$REPO_URL" ]; then
-    echo "  Creating CodeCommit repo: $REPO_NAME"
-    REPO_URL=$(aws codecommit create-repository \
-        --repository-name "$REPO_NAME" \
-        --region "$REGION" \
-        --query 'repositoryMetadata.cloneUrlHttp' \
-        --output text)
-    echo "✓ Repository created: $REPO_URL"
-else
-    echo "✓ Repository exists: $REPO_URL"
-fi
-
-# ----------------------------------------------------------------------------
-# Step 2: Git init and push
-# ----------------------------------------------------------------------------
+echo "AgentCore Endpoint: ${AGENTCORE_ENDPOINT:0:80}..."
+echo "Cognito Pool: $COGNITO_USER_POOL_ID"
+echo "Cognito Client: $COGNITO_CLIENT_ID"
 echo ""
-echo "━━━ Step 2: Push code to CodeCommit ━━━"
+
+# ----------------------------------------------------------------------------
+# Step 1: Build frontend
+# ----------------------------------------------------------------------------
+echo "━━━ Step 1: Building frontend ━━━"
+
+cd "$PROJECT_DIR/frontend"
+npm ci --silent 2>/dev/null || npm install --silent
+npm run build
+npx next export
+
+echo "✓ Frontend built and exported to out/"
+echo ""
+
+# ----------------------------------------------------------------------------
+# Step 2: Deploy to Amplify
+# ----------------------------------------------------------------------------
+echo "━━━ Step 2: Deploying to Amplify ━━━"
 
 cd "$PROJECT_DIR"
 
-# Initialize git if needed
-if [ ! -d ".git" ]; then
-    git init
-    echo "✓ Git initialized"
-fi
+python -c "
+import boto3, zipfile, os, requests, sys
 
-# Set remote
-CURRENT_REMOTE=$(git remote get-url origin 2>/dev/null || echo "")
-if [ "$CURRENT_REMOTE" != "$REPO_URL" ]; then
-    git remote remove origin 2>/dev/null || true
-    git remote add origin "$REPO_URL"
-    echo "✓ Remote set to: $REPO_URL"
-fi
+region = '$REGION'
+app_name = '$APP_NAME'
 
-# Stage and commit
-git add -A
-git diff --cached --quiet 2>/dev/null || git commit -m "Deploy frontend $(date +%Y-%m-%d_%H:%M)"
+client = boto3.client('amplify', region_name=region)
 
-# Push
-echo "  Pushing to CodeCommit..."
-git push -u origin main --force 2>/dev/null || git push -u origin master --force 2>/dev/null
-echo "✓ Code pushed successfully"
+# Check if app exists
+apps = client.list_apps()
+app_id = None
+for app in apps.get('apps', []):
+    if app['name'] == app_name:
+        app_id = app['appId']
+        break
 
-# Determine branch name
-BRANCH=$(git rev-parse --abbrev-ref HEAD)
+# Create app if not exists
+if not app_id:
+    response = client.create_app(
+        name=app_name,
+        platform='WEB',
+        environmentVariables={
+            'NEXT_PUBLIC_AGENTCORE_ENDPOINT': '$AGENTCORE_ENDPOINT',
+            'NEXT_PUBLIC_COGNITO_USER_POOL_ID': '$COGNITO_USER_POOL_ID',
+            'NEXT_PUBLIC_COGNITO_CLIENT_ID': '$COGNITO_CLIENT_ID',
+            'NEXT_PUBLIC_COGNITO_REGION': region
+        },
+        customRules=[
+            {'source': '/<*>', 'target': '/index.html', 'status': '404-200'}
+        ]
+    )
+    app_id = response['app']['appId']
+    client.create_branch(appId=app_id, branchName='main')
+    print(f'✓ Amplify app created: {app_id}')
+else:
+    print(f'✓ Using existing Amplify app: {app_id}')
 
-# ----------------------------------------------------------------------------
-# Step 3: Create Amplify App
-# ----------------------------------------------------------------------------
-echo ""
-echo "━━━ Step 3: Create Amplify App ━━━"
+# Create deployment
+deploy = client.create_deployment(appId=app_id, branchName='main')
+upload_url = deploy['zipUploadUrl']
+job_id = deploy['jobId']
 
-# Check if app already exists
-EXISTING_APP_ID=$(aws amplify list-apps --region "$REGION" --query "apps[?name=='$APP_NAME'].appId" --output text 2>/dev/null || echo "")
+# Zip the out/ directory
+zip_path = '/tmp/amplify-frontend.zip'
+out_dir = 'frontend/out'
+with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zf:
+    for root, dirs, files in os.walk(out_dir):
+        for file in files:
+            file_path = os.path.join(root, file)
+            arcname = os.path.relpath(file_path, out_dir)
+            zf.write(file_path, arcname)
 
-if [ -n "$EXISTING_APP_ID" ] && [ "$EXISTING_APP_ID" != "None" ]; then
-    echo "  App '$APP_NAME' already exists (ID: $EXISTING_APP_ID). Deleting..."
-    aws amplify delete-app --app-id "$EXISTING_APP_ID" --region "$REGION" > /dev/null
-    echo "  Deleted. Creating fresh..."
-    sleep 2
-fi
+print(f'✓ Zip created: {os.path.getsize(zip_path) / 1024:.1f} KB')
 
-APP_ID=$(aws amplify create-app \
-    --name "$APP_NAME" \
-    --region "$REGION" \
-    --platform WEB_COMPUTE \
-    --repository "$REPO_URL" \
-    --environment-variables \
-        "NEXT_PUBLIC_AGENTCORE_ENDPOINT=$AGENTCORE_ENDPOINT,NEXT_PUBLIC_COGNITO_USER_POOL_ID=$COGNITO_USER_POOL_ID,NEXT_PUBLIC_COGNITO_CLIENT_ID=$COGNITO_CLIENT_ID,NEXT_PUBLIC_COGNITO_REGION=$REGION" \
-    --query 'app.appId' \
-    --output text)
+# Upload
+resp = requests.put(upload_url, data=open(zip_path, 'rb'))
+if resp.status_code != 200:
+    print(f'❌ Upload failed: {resp.status_code}')
+    sys.exit(1)
+print('✓ Artifacts uploaded')
 
-echo "✓ Amplify app created: $APP_ID"
+# Start deployment
+result = client.start_deployment(appId=app_id, branchName='main', jobId=job_id)
+print(f'✓ Deployment started (Job ID: {job_id})')
 
-# ----------------------------------------------------------------------------
-# Step 4: Connect branch
-# ----------------------------------------------------------------------------
-echo ""
-echo "━━━ Step 4: Connect branch ━━━"
+# Wait for completion
+import time
+status = 'PENDING'
+while status in ('PENDING', 'RUNNING'):
+    time.sleep(10)
+    job = client.get_job(appId=app_id, branchName='main', jobId=job_id)
+    status = job['job']['summary']['status']
+    print(f'  Status: {status}')
 
-aws amplify create-branch \
-    --app-id "$APP_ID" \
-    --branch-name "$BRANCH" \
-    --region "$REGION" > /dev/null
-
-echo "✓ Branch '$BRANCH' connected"
-
-# ----------------------------------------------------------------------------
-# Step 5: Trigger build
-# ----------------------------------------------------------------------------
-echo ""
-echo "━━━ Step 5: Trigger deployment ━━━"
-
-JOB_ID=$(aws amplify start-job \
-    --app-id "$APP_ID" \
-    --branch-name "$BRANCH" \
-    --job-type RELEASE \
-    --region "$REGION" \
-    --query 'jobSummary.jobId' \
-    --output text)
-
-echo "✓ Build triggered (Job ID: $JOB_ID)"
-
-# ----------------------------------------------------------------------------
-# Step 6: Wait for deployment
-# ----------------------------------------------------------------------------
-echo ""
-echo "━━━ Step 6: Waiting for deployment... ━━━"
-echo "  (This takes 2-5 minutes)"
-
-STATUS="PENDING"
-while [ "$STATUS" = "PENDING" ] || [ "$STATUS" = "RUNNING" ]; do
-    sleep 15
-    STATUS=$(aws amplify get-job \
-        --app-id "$APP_ID" \
-        --branch-name "$BRANCH" \
-        --job-id "$JOB_ID" \
-        --region "$REGION" \
-        --query 'job.summary.status' \
-        --output text 2>/dev/null || echo "RUNNING")
-    echo "  Status: $STATUS"
-done
+if status == 'SUCCEED':
+    print(f'')
+    print(f'✅ Deployment Successful!')
+    print(f'   URL: https://main.{app_id}.amplifyapp.com')
+else:
+    print(f'❌ Deployment failed: {status}')
+    sys.exit(1)
+"
 
 echo ""
-
-# ----------------------------------------------------------------------------
-# Result
-# ----------------------------------------------------------------------------
-if [ "$STATUS" = "SUCCEED" ]; then
-    echo "============================================"
-    echo "  ✅ Deployment Successful!"
-    echo "============================================"
-    echo ""
-    echo "  Your app is live at:"
-    echo "  https://$BRANCH.$APP_ID.amplifyapp.com"
-    echo ""
-    echo "  App ID: $APP_ID"
-    echo "  Region: $REGION"
-    echo ""
-    echo "  Future deployments: just 'git push' and"
-    echo "  Amplify will auto-build."
-    echo ""
-else
-    echo "============================================"
-    echo "  ❌ Deployment Failed (Status: $STATUS)"
-    echo "============================================"
-    echo ""
-    echo "  Check build logs:"
-    echo "  aws amplify get-job --app-id $APP_ID --branch-name $BRANCH --job-id $JOB_ID --region $REGION"
-    echo ""
-    echo "  Or visit:"
-    echo "  https://$REGION.console.aws.amazon.com/amplify/apps/$APP_ID"
-    echo ""
-fi
+echo "============================================"
+echo "  ✅ Frontend Deployment Complete!"
+echo "============================================"
+echo ""

@@ -10,11 +10,11 @@ applications:
           commands:
             - env | grep -i NEXT_PUBLIC >> .env.production || true
             - npm run build
+            - npx next export
       artifacts:
-        baseDirectory: .next
+        baseDirectory: out
         files:
           - '**/*'
       cache:
         paths:
           - node_modules/**/*
-          - .next/cache/**/*
