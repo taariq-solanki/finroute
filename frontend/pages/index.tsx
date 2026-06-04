@@ -90,7 +90,7 @@ export default function Home() {
             if (last.role === "assistant") {
               updated[updated.length - 1] = {
                 ...last,
-                content: last.content + chunk,
+                content: chunk,
               };
             }
             return updated;

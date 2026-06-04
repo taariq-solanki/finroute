@@ -18,6 +18,10 @@ function stripThinkingTags(text: string): string {
   cleaned = cleaned.replace(/<thinking>[\s\S]*/gi, "");
   // Remove stray closing tags
   cleaned = cleaned.replace(/<\/thinking>/gi, "");
+  // Convert literal \n sequences to actual newlines
+  cleaned = cleaned.replace(/\\n/g, "\n");
+  // Trim leading/trailing whitespace
+  cleaned = cleaned.trim();
   return cleaned;
 }
 
@@ -64,7 +68,6 @@ export async function sendMessage(
 
     const decoder = new TextDecoder();
     let buffer = "";
-    let insideThinking = false;
     let fullResponse = "";
 
     while (true) {
@@ -92,26 +95,11 @@ export async function sendMessage(
           continue;
         }
 
-        // Track thinking state across all chunks
-        if (data.includes("<thinking>")) {
-          insideThinking = true;
-        }
-        if (data.includes("</thinking>")) {
-          insideThinking = false;
-          data = data.replace(/<\/thinking>/gi, "");
-        }
-
-        // Skip content inside thinking blocks
-        if (insideThinking) {
-          continue;
-        }
-
-        // Clean any residual thinking tags
-        data = stripThinkingTags(data);
-
         if (data.trim()) {
           fullResponse += data;
-          onChunk(data);
+          // Strip all thinking tags from the accumulated response and emit the clean version
+          const cleaned = stripThinkingTags(fullResponse);
+          onChunk(cleaned);
         }
       }
     }

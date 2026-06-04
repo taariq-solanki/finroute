@@ -150,12 +150,13 @@ def setup_cognito_user_pool():
         return None
 
 
-def retrieve_credentials_from_secrets_manager(secret_name):
+def retrieve_credentials_from_secrets_manager(secret_name=None):
     """
     Retrieve stored credentials from AWS Secrets Manager.
     
     Args:
-        secret_name: The name of the secret to retrieve
+        secret_name: The name of the secret to retrieve. If None, auto-discovers
+                     the latest agentcore-project-credentials secret.
         
     Returns:
         dict: Dictionary containing username, password, pool_id, and client_id
@@ -163,6 +164,22 @@ def retrieve_credentials_from_secrets_manager(secret_name):
     boto_session = Session()
     region = boto_session.region_name
     secrets_client = boto3.client("secretsmanager", region_name=region)
+    
+    # Auto-discover if no secret name provided
+    if not secret_name:
+        try:
+            secrets = secrets_client.list_secrets(
+                Filters=[{"Key": "name", "Values": ["agentcore-project-credentials"]}]
+            )
+            active_secrets = [s for s in secrets.get("SecretList", []) if not s.get("DeletedDate")]
+            if active_secrets:
+                secret_name = active_secrets[0]["Name"]
+            else:
+                print("❌ No agentcore-project-credentials secret found.")
+                return None
+        except ClientError as e:
+            print(f"Error listing secrets: {e}")
+            return None
     
     try:
         response = secrets_client.get_secret_value(SecretId=secret_name)
