@@ -3,11 +3,21 @@ import Head from "next/head";
 import ChatInput from "../src/components/ChatInput";
 import ChatMessage from "../src/components/ChatMessage";
 import LoginForm from "../src/components/LoginForm";
-import { signIn, signOut, getCurrentSession, AuthTokens } from "../src/lib/auth";
+import {
+  signIn,
+  signOut,
+  isAuthenticated,
+  getIdToken,
+  setOnSessionExpired,
+  preserveConversationHistory,
+  restoreConversationHistory,
+  ChatMessage as AuthChatMessage,
+} from "../src/lib/auth";
 import {
   sendMessage,
   generateSessionId,
   ChatMessage as ChatMessageType,
+  WafErrorInfo,
 } from "../src/lib/agent";
 
 const SUGGESTIONS = [
@@ -22,28 +32,74 @@ const SUGGESTIONS = [
 export default function Home() {
   const [messages, setMessages] = useState<ChatMessageType[]>([]);
   const [isStreaming, setIsStreaming] = useState(false);
-  const [auth, setAuth] = useState<AuthTokens | null>(null);
+  const [loggedIn, setLoggedIn] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
+  const [sessionExpired, setSessionExpired] = useState(false);
   const [authChecked, setAuthChecked] = useState(false);
   const [sessionId] = useState(generateSessionId);
+  const [rateLimitCountdown, setRateLimitCountdown] = useState<number>(0);
+  const countdownRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    getCurrentSession().then((session) => {
-      if (session) setAuth(session);
-      setAuthChecked(true);
+    // Check in-memory auth state on mount
+    setLoggedIn(isAuthenticated());
+    setAuthChecked(true);
+
+    // Restore any preserved conversation history from a prior session expiry
+    const restored = restoreConversationHistory();
+    if (restored && restored.length > 0) {
+      const restoredMessages: ChatMessageType[] = restored.map((m) => ({
+        ...m,
+        timestamp: new Date(m.timestamp),
+      }));
+      setMessages(restoredMessages);
+    }
+  }, []);
+
+  // Wire the session-expiry callback so expiry surfaces without a send-first.
+  // handleSessionExpired() in auth.ts preserves messages before invoking this,
+  // and restoreConversationHistory (mount effect) repopulates them on re-login.
+  useEffect(() => {
+    setOnSessionExpired(() => {
+      setLoggedIn(false);
+      setSessionExpired(true);
     });
+    return () => setOnSessionExpired(null);
+  }, []);
+
+  // Cleanup countdown timer on unmount
+  useEffect(() => {
+    return () => {
+      if (countdownRef.current) {
+        clearInterval(countdownRef.current);
+      }
+    };
   }, []);
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
+  // Preserve conversation history whenever messages change
+  useEffect(() => {
+    if (messages.length > 0) {
+      const serializable: AuthChatMessage[] = messages.map((m) => ({
+        id: m.id,
+        role: m.role,
+        content: m.content,
+        timestamp: m.timestamp instanceof Date ? m.timestamp.toISOString() : String(m.timestamp),
+      }));
+      preserveConversationHistory(serializable);
+    }
+  }, [messages]);
+
   const handleLogin = async (username: string, password: string) => {
     setAuthError(null);
     try {
-      const tokens = await signIn(username, password);
-      setAuth(tokens);
+      await signIn(username, password);
+      setSessionExpired(false);
+      setLoggedIn(true);
     } catch (err: unknown) {
       const errorMessage =
         err instanceof Error ? err.message : "Authentication failed";
@@ -53,13 +109,44 @@ export default function Home() {
 
   const handleLogout = () => {
     signOut();
-    setAuth(null);
+    setLoggedIn(false);
     setMessages([]);
   };
 
+  const startRateLimitCountdown = useCallback((seconds: number) => {
+    // Clear any existing countdown
+    if (countdownRef.current) {
+      clearInterval(countdownRef.current);
+    }
+    setRateLimitCountdown(seconds);
+    countdownRef.current = setInterval(() => {
+      setRateLimitCountdown((prev) => {
+        if (prev <= 1) {
+          if (countdownRef.current) {
+            clearInterval(countdownRef.current);
+            countdownRef.current = null;
+          }
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+  }, []);
+
   const handleSend = useCallback(
-    (content: string) => {
-      if (!auth) return;
+    async (content: string) => {
+      if (!loggedIn) return;
+
+      let idToken: string;
+      try {
+        idToken = await getIdToken();
+      } catch {
+        // Session expired via the send path. The onSessionExpired callback
+        // already flips state; set it here too in case the callback was unset.
+        setLoggedIn(false);
+        setSessionExpired(true);
+        return;
+      }
 
       const userMessage: ChatMessageType = {
         id: Date.now().toString(36) + Math.random().toString(36).substring(2),
@@ -80,7 +167,7 @@ export default function Home() {
 
       sendMessage(
         content,
-        auth.accessToken,
+        idToken,
         sessionId,
         "default_user",
         (chunk) => {
@@ -97,7 +184,12 @@ export default function Home() {
           });
         },
         () => setIsStreaming(false),
-        (error) => {
+        (error, wafError?: WafErrorInfo) => {
+          // Start countdown timer for rate limit responses
+          if (wafError?.status === 429 && wafError.retryAfterSeconds) {
+            startRateLimitCountdown(wafError.retryAfterSeconds);
+          }
+
           setMessages((prev) => {
             const updated = [...prev];
             const last = updated[updated.length - 1];
@@ -113,7 +205,7 @@ export default function Home() {
         }
       );
     },
-    [auth, sessionId]
+    [loggedIn, sessionId, startRateLimitCountdown]
   );
 
   if (!authChecked) {
@@ -124,12 +216,17 @@ export default function Home() {
     );
   }
 
-  if (!auth) {
+  if (!loggedIn) {
     return (
       <>
         <Head>
           <title>Sign In — NEXT Insurance Financial Advisor</title>
         </Head>
+        {sessionExpired && (
+          <div className="session-expired-banner" role="alert">
+            Your session expired, please sign in again.
+          </div>
+        )}
         <LoginForm onLogin={handleLogin} error={authError} />
       </>
     );
@@ -198,7 +295,12 @@ export default function Home() {
 
         {/* Input Area */}
         <div className="input-area">
-          <ChatInput onSend={handleSend} disabled={isStreaming} />
+          {rateLimitCountdown > 0 && (
+            <div className="rate-limit-banner" role="alert">
+              ⏳ Rate limit reached. You can send a new message in {rateLimitCountdown} second{rateLimitCountdown !== 1 ? "s" : ""}.
+            </div>
+          )}
+          <ChatInput onSend={handleSend} disabled={isStreaming || rateLimitCountdown > 0} />
         </div>
 
         {/* Footer Branding */}
