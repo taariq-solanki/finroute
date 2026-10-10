@@ -37,20 +37,28 @@ echo ""
 # ----------------------------------------------------------------------------
 echo "━━━ Step 1: Deploying agent to AgentCore ━━━"
 
+# Memory id for cross-session persistence (read from committed config)
+MEMORY_ID=$(grep 'memory_id:' .bedrock_agentcore.yaml | awk '{print $2}' | head -n1)
+
 # Use the starter toolkit to deploy
-python -c "
+python3 -c "
 from bedrock_agentcore_starter_toolkit import Runtime
 runtime = Runtime()
 runtime.configure(
     entrypoint='main.py',
-    execution_role='arn:aws:iam::$AWS_ACCOUNT:role/AmazonBedrockAgentCoreSDKRuntime-$REGION',
+    execution_role='arn:aws:iam::$AWS_ACCOUNT:role/agentcore-execution-personal_finance_agent-staging',
     auto_create_execution_role=False,
     auto_create_ecr=True,
     requirements_file='requirements.txt',
     region='$REGION',
     agent_name='personal_finance_agent',
 )
-result = runtime.launch()
+result = runtime.launch(
+    env_vars={
+        'OTEL_PYTHON_EXCLUDED_URLS': '/ping,/invocations',
+        'AGENTCORE_MEMORY_ID': '$MEMORY_ID',
+    }
+)
 print(f'Agent ARN: {result.agent_arn}')
 print(f'Agent ID: {result.agent_id}')
 " 2>&1 | tee /tmp/deploy_output.txt
@@ -80,7 +88,7 @@ echo ""
 echo "━━━ Step 2: Updating frontend configuration ━━━"
 
 # URL-encode the ARN
-ENCODED_ARN=$(python -c "import urllib.parse; print(urllib.parse.quote('$AGENT_ARN', safe=''))")
+ENCODED_ARN=$(python3 -c "import urllib.parse; print(urllib.parse.quote('$AGENT_ARN', safe=''))")
 
 # Read existing Cognito config
 POOL_ID=$(grep COGNITO_USER_POOL_ID "$PROJECT_DIR/frontend/.env.local" | cut -d= -f2)
