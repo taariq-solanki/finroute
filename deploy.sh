@@ -41,12 +41,12 @@ echo "━━━ Step 1: Deploying agent to AgentCore ━━━"
 MEMORY_ID=$(grep 'memory_id:' .bedrock_agentcore.yaml | awk '{print $2}' | head -n1)
 
 # Use the starter toolkit to deploy
-python3 -c "
+python -c "
 from bedrock_agentcore_starter_toolkit import Runtime
 runtime = Runtime()
 runtime.configure(
     entrypoint='main.py',
-    execution_role='arn:aws:iam::$AWS_ACCOUNT:role/agentcore-execution-personal_finance_agent-staging',
+    execution_role='arn:aws:iam::$AWS_ACCOUNT:role/AmazonBedrockAgentCoreSDKRuntime-$REGION',
     auto_create_execution_role=False,
     auto_create_ecr=True,
     requirements_file='requirements.txt',
@@ -88,7 +88,7 @@ echo ""
 echo "━━━ Step 2: Updating frontend configuration ━━━"
 
 # URL-encode the ARN
-ENCODED_ARN=$(python3 -c "import urllib.parse; print(urllib.parse.quote('$AGENT_ARN', safe=''))")
+ENCODED_ARN=$(python -c "import urllib.parse; print(urllib.parse.quote('$AGENT_ARN', safe=''))")
 
 # Read existing Cognito config
 POOL_ID=$(grep COGNITO_USER_POOL_ID "$PROJECT_DIR/frontend/.env.local" | cut -d= -f2)

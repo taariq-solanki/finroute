@@ -47,6 +47,12 @@ each other and can be done in any order after item 1, but are listed in P1→P2 
       reached"). Record pass/fail counts and coverage % in the implementation notes.
 
 - [x] 2. **(P1.1) Pin the Dockerfile base image to Python 3.12.**
+      ITER-2 CORRECTION: review found the parent `2b6c49e` was ALREADY on
+      `python3.12-bookworm-slim`, so the intended one-line change is a no-op. The first
+      commit's out-of-scope rewrite (CVE layer, ENV consolidation, `EXPOSE 9000`,
+      `aws-opentelemetry-distro ==0.12.2` version pin) was reverted via
+      `git show 2b6c49e:Dockerfile > Dockerfile`. `git diff 2b6c49e -- Dockerfile` is now
+      empty; line 1 is `python3.12-bookworm-slim`; the `>=0.10.1` floor is restored.
       Change ONLY the Python minor version in the first line of the Dockerfile from the
       3.13 tag to the 3.12 tag of the same astral-sh/uv image family. The 3.12 tag
       (`ghcr.io/astral-sh/uv:python3.12-bookworm-slim`) is a published variant in the
@@ -121,6 +127,13 @@ each other and can be done in any order after item 1, but are listed in P1→P2 
       discover them from `infra/package.json` and `infra/cdk.json` first.)
 
 - [x] 5. **(P2.2) Inject `AGENTCORE_MEMORY_ID` into the runtime env via the deploy path.**
+      ITER-2 CORRECTION: review found the first commit also silently changed
+      `execution_role` inside `configure(...)` and swapped `python`→`python3` — both
+      out of scope. Reverted `execution_role` to the parent
+      `AmazonBedrockAgentCoreSDKRuntime-$REGION` and reverted the interpreter swaps.
+      The in-scope memory injection (`MEMORY_ID` sourced from `.bedrock_agentcore.yaml`
+      + `launch(env_vars={...})`) is retained. `git diff 2b6c49e -- deploy.sh` now shows
+      only the two memory-injection hunks.
       VERIFIED the gap: `main.py` reads `os.environ.get('AGENTCORE_MEMORY_ID')` and
       no-ops memory when unset. The POC notebook `AWS_Deployment.ipynb` passes it via
       `agentcore_runtime.launch(env_vars={ "OTEL_PYTHON_EXCLUDED_URLS": "/ping,/invocations",

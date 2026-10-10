@@ -1,5 +1,58 @@
 # P1 & P2 Deploy-Readiness Fixes — Verification Evidence
 
+Iteration: SECOND (addresses `.agents/tasks/p1-p2-review.json`, verdict CHANGES_REQUESTED).
+
+## Iteration 2 — review findings addressed (over-reach reverted)
+
+The reviewer confirmed four blocking findings, all scope/disclosure problems in the first
+commit, plus the P1.2 coverage item (non-blocking, needs-user-decision). Fixes applied this
+iteration (working tree, uncommitted at time of writing — Dockerfile is tracked, deploy.sh is
+tracked):
+
+- **P1.1 (findings 1 & 2) — Dockerfile reverted to parent `2b6c49e`.** The parent was ALREADY
+  on `ghcr.io/astral-sh/uv:python3.12-bookworm-slim`, so the intended P1.1 single-line change
+  is a no-op. The first commit's unrelated rewrite (CVE `apt-get upgrade` layer, ENV
+  consolidation incl. `UV_NO_PROGRESS`/`PYTHONUNBUFFERED`, `EXPOSE 9000`, and the
+  `aws-opentelemetry-distro >=0.10.1 → ==0.12.2` version pin) has been fully reverted.
+  Command: `git show 2b6c49e:Dockerfile > Dockerfile`. Verify: `git diff 2b6c49e -- Dockerfile`
+  is EMPTY (byte-identical to parent); line 1 reads `python3.12-bookworm-slim`; the
+  `aws-opentelemetry-distro>=0.10.1` open floor is restored.
+- **P2.2 (findings 3 & 4) — deploy.sh out-of-scope edits reverted; memory injection kept.**
+  Reverted `execution_role` inside `configure(...)` back to the parent
+  `AmazonBedrockAgentCoreSDKRuntime-$REGION`, and reverted both `python3 -c` → `python -c`
+  swaps. The in-scope P2.2 change (sourcing `MEMORY_ID` from `.bedrock_agentcore.yaml` and
+  passing `runtime.launch(env_vars={OTEL_PYTHON_EXCLUDED_URLS, AGENTCORE_MEMORY_ID})`) is
+  retained. Verify: `git diff 2b6c49e -- deploy.sh` shows ONLY the two memory-injection hunks
+  (the `MEMORY_ID=$(grep ...)` line and the `launch(env_vars={...})` block); no
+  `execution_role` or interpreter change remains.
+- **P1.2 (finding 5, non-blocking) — unchanged, re-verified honestly.** 95/95 tests pass;
+  coverage still 49.74% < `fail_under=80`. Threshold NOT lowered, no tests skipped/deleted.
+  Remains flagged as needs-user-decision (pre-existing untested modules `main`, `utils/*`).
+
+Iteration-2 verification commands:
+```
+git show 2b6c49e:Dockerfile > Dockerfile
+git diff 2b6c49e -- Dockerfile        -> EMPTY (identical to parent)
+git diff 2b6c49e -- deploy.sh         -> only MEMORY_ID + launch(env_vars=...) hunks
+bash -n deploy.sh                     -> OK
+bash -n setup.sh                      -> OK
+source .venv/bin/activate && python -m pytest -q            -> 95 passed in 10.98s
+python -m pytest --cov --cov-report=term-missing            -> 95 passed; TOTAL 49.74% (< 80 gate)
+python -m py_compile main.py                                -> OK
+cd infra && npm run build (tsc)                             -> exit 0, no type errors
+cd infra && npx cdk synth --quiet                           -> Successfully synthesized
+grep NEXT_PUBLIC_AGENTCORE_ENDPOINT cdk.out/*.template.json -> present (Staging & Production), /runtimes/ form
+grep NEXT_PUBLIC_AGENT_ENDPOINT     cdk.out/*.template.json -> 0 matches
+grep 'entrypoint:' .bedrock_agentcore.yaml                  -> entrypoint: main.py
+head iam-roles.yaml                                         -> LEGACY/SECONDARY header present
+```
+Correct items from iteration 1 (P1.3 entrypoint, P2.1 endpoint var + Cognito names,
+P2.3 iam-roles legacy header) were re-verified unchanged and remain intact.
+
+---
+
+## Iteration 1 record (retained for history)
+
 Iteration: FIRST (no `.agents/tasks/p1-p2-review.json` present).
 All commands run from the project root
 `/Users/cloudageglobal/Desktop/Ai_ML_GenAI_GenBI_AgenticAi_MultiAgentAi_HarnessEngineering/AgenticAI/StrandsSubAgents/SourceCode`
