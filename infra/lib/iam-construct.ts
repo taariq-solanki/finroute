@@ -16,6 +16,8 @@ export interface IamConstructProps {
   runtimeName: string;
   /** ECR repository name for agent container images */
   ecrRepositoryName: string;
+  /** ARN of the AgentCore Memory resource from MemoryConstruct (scopes the memory data-plane statement) */
+  memoryArn: string;
 }
 
 /**
@@ -121,6 +123,27 @@ export class IamConstruct extends Construct {
           "logs:PutLogEvents",
         ],
         resources: [logGroupArn],
+      })
+    );
+
+    // Statement 6: AgentCore Memory data-plane access (6 actions, scoped to the
+    // specific memory ARN and its child resources).
+    // Mirrors the live inline policy `AgentCoreMemoryAccess` on the execution role.
+    // Least-privilege: no bedrock-agentcore:* wildcard and no "*" resource — only
+    // the six event/memory-record data-plane actions on props.memoryArn (and ARN/*).
+    this.executionRole.addToPolicy(
+      new iam.PolicyStatement({
+        sid: "AgentCoreMemoryAccess",
+        effect: iam.Effect.ALLOW,
+        actions: [
+          "bedrock-agentcore:CreateEvent",
+          "bedrock-agentcore:ListEvents",
+          "bedrock-agentcore:GetEvent",
+          "bedrock-agentcore:RetrieveMemoryRecords",
+          "bedrock-agentcore:ListMemoryRecords",
+          "bedrock-agentcore:GetMemoryRecord",
+        ],
+        resources: [props.memoryArn, `${props.memoryArn}/*`],
       })
     );
 

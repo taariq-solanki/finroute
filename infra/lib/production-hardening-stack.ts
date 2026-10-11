@@ -10,6 +10,7 @@ import { ProductionHardeningStackProps } from "./types";
 import { IamConstruct } from "./iam-construct";
 import { WafConstruct } from "./waf-construct";
 import { MemoryConstruct } from "./memory-construct";
+import { buildCustomJwtAuthorizer } from "./runtime-auth-config";
 
 /**
  * Main stack for production hardening of the Multi-Agent Financial Advisor.
@@ -66,6 +67,7 @@ export class ProductionHardeningStack extends cdk.Stack {
       accountId: props.accountId,
       runtimeName: props.runtimeName,
       ecrRepositoryName: props.ecrRepositoryName,
+      memoryArn: memory.memoryArn,
     });
 
     // =========================================================================
@@ -438,6 +440,22 @@ export class ProductionHardeningStack extends cdk.Stack {
       value: guardrail.ref,
       description: "Bedrock Guardrail ID",
       exportName: `${props.environment}-guardrail-id`,
+    });
+
+    // Inbound JWT authorizer config for the toolkit-managed AgentCore runtime.
+    // The runtime is NOT modeled in CDK; deploy.sh applies this authorizer at
+    // launch. Emitted here as a documented reference so a from-scratch deploy
+    // reproduces the same Cognito-backed authorizer.
+    new cdk.CfnOutput(this, "RuntimeJwtAuthorizer", {
+      value: JSON.stringify(
+        buildCustomJwtAuthorizer(
+          props.region,
+          userPool.userPoolId,
+          userPoolClient.userPoolClientId
+        )
+      ),
+      description: "AgentCore runtime inbound JWT authorizer config (toolkit-managed runtime)",
+      exportName: `${props.environment}-runtime-jwt-authorizer`,
     });
   }
 }
