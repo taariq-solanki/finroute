@@ -229,7 +229,8 @@ Key code fixes applied during deployment to AgentCore:
 - `request_factory.py` - BedrockModel initialized via `_get_bedrock_model()` function (not module-level)
 
 ### Authentication fix
-- `frontend/src/lib/auth.ts` - `getIdToken()` returns the Cognito `idToken` as the bearer (AgentCore JWT authorizer validates the `aud` claim, which only exists in Cognito ID tokens)
+- `deploy.sh` - the runtime is configured with a `customJWTAuthorizer` scoped to the Cognito pool (`allowedClients=[<app client id>]`, Cognito OIDC `discoveryUrl`)
+- `frontend/src/lib/auth.ts` - `getAccessToken()` returns the Cognito **access token** as the bearer. AgentCore's `customJWTAuthorizer` validates the access token's `client_id` claim against `allowedClients`; a Cognito ID token carries the client id in `aud` (no `client_id` claim) and is rejected with 401, so the access token is the correct bearer
 
 ### SSE streaming fix
 - `frontend/src/lib/agent.ts` - `finalize()` treats stream end without `[DONE]` marker as normal completion (AgentCore does not send `[DONE]`)
@@ -278,10 +279,10 @@ Run these in order for a step-by-step walkthrough:
 
 ```
 User -> Frontend (Next.js / Amplify)
-         | Bearer token (Cognito ID token) + SSE
+         | Bearer token (Cognito access token) + SSE
          v
        AgentCore Runtime (eu-north-1)
-         | JWT authorizer validates `aud` claim
+         | customJWTAuthorizer validates `client_id` claim
          v
        Orchestrator Agent (main.py)
          |-- Budget Agent (budget_agent.py)
@@ -292,7 +293,7 @@ User -> Frontend (Next.js / Amplify)
 ```
 
 - **Model:** Amazon Nova Pro (`eu.amazon.nova-pro-v1:0`) via Converse API
-- **Auth:** Cognito USER_PASSWORD_AUTH (ID token for AgentCore JWT validation)
+- **Auth:** Cognito USER_PASSWORD_AUTH (access token for AgentCore `client_id` JWT validation)
 - **Guardrail:** Blocks Bitcoin/crypto investment advice (`finance-advisor-guardrail-staging`)
 - **Memory:** AgentCore Memory (STM_ONLY mode)
 - **Container:** ARM64/Graviton via CodeBuild, `ghcr.io/astral-sh/uv:python3.12-bookworm-slim` base

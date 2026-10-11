@@ -19,8 +19,10 @@ export interface ChatMessage {
 }
 
 interface TokenState {
-  // Captured from Cognito but intentionally NOT used as the AgentCore bearer;
-  // the ID token (idToken) is sent as the Bearer instead.
+  // The ACCESS token is the on-the-wire bearer for AgentCore. The runtime's
+  // customJWTAuthorizer validates the access token's `client_id` claim against
+  // allowedClients; a Cognito ID token has no `client_id` claim (only `aud`)
+  // and is rejected with 401, so the access token is what we send.
   accessToken: string;
   refreshToken: string;
   idToken: string;
@@ -142,7 +144,7 @@ export async function signIn(username: string, password: string): Promise<void> 
 
 /**
  * Perform a single token refresh against Cognito.
- * Returns the new ID token on success.
+ * Returns the new ACCESS token on success (the AgentCore bearer).
  * On failure, triggers session expiry flow.
  */
 async function performRefresh(): Promise<string> {
@@ -198,7 +200,7 @@ async function performRefresh(): Promise<string> {
         expiresAt: parseJwtExpiry(AccessToken),
       };
 
-      return tokenState.idToken;
+      return tokenState.accessToken;
     }
 
     throw new Error("Unexpected refresh response");
@@ -208,16 +210,17 @@ async function performRefresh(): Promise<string> {
   }
 }
 
-// ─── getIdToken ──────────────────────────────────────────────────────────────
+// ─── getAccessToken ────────────────────────────────────────────────────────
 
 /**
- * Get the current ID token, automatically refreshing if it expires
- * within the next 30 seconds. This is the token sent as the AgentCore bearer.
+ * Get the current ACCESS token, automatically refreshing if it expires
+ * within the next 30 seconds. This is the token sent as the AgentCore bearer:
+ * the runtime's customJWTAuthorizer validates its `client_id` claim.
  *
  * Implements refresh coalescing: only one in-flight refresh at a time.
  * Additional callers await the same promise.
  */
-export async function getIdToken(): Promise<string> {
+export async function getAccessToken(): Promise<string> {
   if (!tokenState) {
     handleSessionExpired();
     throw new Error("Not authenticated");
@@ -228,7 +231,7 @@ export async function getIdToken(): Promise<string> {
 
   // If token is valid and not expiring within 30 seconds, return it
   if (timeUntilExpiry > 30) {
-    return tokenState.idToken;
+    return tokenState.accessToken;
   }
 
   // Token is expired or expiring soon - refresh needed
@@ -266,7 +269,7 @@ export function signOut(): void {
 
 /**
  * Check if there is an active session (token state exists in closure).
- * Does NOT check token expiry - use getIdToken() for that.
+ * Does NOT check token expiry - use getAccessToken() for that.
  */
 export function isAuthenticated(): boolean {
   return tokenState !== null;

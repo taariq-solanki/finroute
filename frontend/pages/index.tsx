@@ -7,7 +7,7 @@ import {
   signIn,
   signOut,
   isAuthenticated,
-  getIdToken,
+  getAccessToken,
   setOnSessionExpired,
   preserveConversationHistory,
   restoreConversationHistory,
@@ -137,9 +137,9 @@ export default function Home() {
     async (content: string) => {
       if (!loggedIn) return;
 
-      let idToken: string;
+      let accessToken: string;
       try {
-        idToken = await getIdToken();
+        accessToken = await getAccessToken();
       } catch {
         // Session expired via the send path. The onSessionExpired callback
         // already flips state; set it here too in case the callback was unset.
@@ -167,7 +167,7 @@ export default function Home() {
 
       sendMessage(
         content,
-        idToken,
+        accessToken,
         sessionId,
         "default_user",
         (chunk) => {

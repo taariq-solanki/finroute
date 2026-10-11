@@ -162,11 +162,11 @@ def _fetch_memory_records(
         Formatted memory context string, or None if no records found.
     """
     memory_client = MemoryClient()
-    relevant_memories = memory_client.query_records(
+    relevant_memories = memory_client.retrieve_memories(
         memory_id=memory_id,
-        query=user_message,
         namespace=f"finance/user/{actor_id}/facts",
-        max_results=5,
+        query=user_message,
+        top_k=5,
     )
 
     if not relevant_memories:
@@ -174,7 +174,13 @@ def _fetch_memory_records(
 
     memory_context = "\n\nRelevant user information from previous conversations:\n"
     for record in relevant_memories:
-        memory_context += f"- {record.get('content', '')}\n"
+        # retrieve_memories returns records whose content is nested as
+        # {"content": {"text": "..."}}; fall back gracefully for other shapes.
+        content = record.get("content", "")
+        if isinstance(content, dict):
+            content = content.get("text", "")
+        if content:
+            memory_context += f"- {content}\n"
 
     return memory_context
 
@@ -365,5 +371,8 @@ def _store_memory_event(
         memory_id=memory_id,
         actor_id=actor_id,
         session_id=session_id,
-        content=f"User: {user_message}\nAssistant: {full_response}",
+        messages=[
+            (user_message, "USER"),
+            (full_response, "ASSISTANT"),
+        ],
     )
