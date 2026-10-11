@@ -37,26 +37,32 @@ echo ""
 # ----------------------------------------------------------------------------
 echo "━━━ Step 1: Deploying agent to AgentCore ━━━"
 
-# Memory id for cross-session persistence (read from committed config)
-MEMORY_ID=$(grep 'memory_id:' .bedrock_agentcore.yaml | awk '{print $2}' | head -n1)
+# Memory id for cross-session persistence (read from committed config).
+# On a fresh account without .bedrock_agentcore.yaml this is empty, which main.py
+# tolerates (memory lookup/store is guarded by `if memory_id:`).
+MEMORY_ID=$(grep 'memory_id:' .bedrock_agentcore.yaml 2>/dev/null | awk '{print $2}' | head -n1 || echo "")
 
-# Use the starter toolkit to deploy
-python -c "
+# Use the starter toolkit to deploy.
+# Values are passed via the environment (not string-spliced into Python literals)
+# so a stray quote/newline in a derived value cannot break or inject the heredoc.
+export AWS_ACCOUNT REGION MEMORY_ID
+python3 -c "
+import os
 from bedrock_agentcore_starter_toolkit import Runtime
 runtime = Runtime()
 runtime.configure(
     entrypoint='main.py',
-    execution_role='arn:aws:iam::$AWS_ACCOUNT:role/AmazonBedrockAgentCoreSDKRuntime-$REGION',
+    execution_role=f\"arn:aws:iam::{os.environ['AWS_ACCOUNT']}:role/AmazonBedrockAgentCoreSDKRuntime-{os.environ['REGION']}\",
     auto_create_execution_role=False,
     auto_create_ecr=True,
     requirements_file='requirements.txt',
-    region='$REGION',
+    region=os.environ['REGION'],
     agent_name='personal_finance_agent',
 )
 result = runtime.launch(
     env_vars={
         'OTEL_PYTHON_EXCLUDED_URLS': '/ping,/invocations',
-        'AGENTCORE_MEMORY_ID': '$MEMORY_ID',
+        'AGENTCORE_MEMORY_ID': os.environ.get('MEMORY_ID', ''),
     }
 )
 print(f'Agent ARN: {result.agent_arn}')
@@ -87,8 +93,8 @@ echo "  ID: $AGENT_ID"
 echo ""
 echo "━━━ Step 2: Updating frontend configuration ━━━"
 
-# URL-encode the ARN
-ENCODED_ARN=$(python -c "import urllib.parse; print(urllib.parse.quote('$AGENT_ARN', safe=''))")
+# URL-encode the ARN (read via env so an unexpected char cannot break/inject the one-liner)
+ENCODED_ARN=$(AGENT_ARN="$AGENT_ARN" python3 -c "import os, urllib.parse; print(urllib.parse.quote(os.environ['AGENT_ARN'], safe=''))")
 
 # Read existing Cognito config
 POOL_ID=$(grep COGNITO_USER_POOL_ID "$PROJECT_DIR/frontend/.env.local" | cut -d= -f2)

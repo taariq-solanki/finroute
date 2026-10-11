@@ -23,6 +23,49 @@ NEXT Insurance branding - Powered by CloudAge.
 
 ---
 
+## Deployment Steps (ranked)
+
+Run in order on a fresh account. Steps 5–7 (git/Amplify) are optional — use them for CI/CD builds instead of the manual `./deploy-frontend.sh` in step 4.
+
+```bash
+# 0. One-time prerequisites: AWS CLI configured for eu-north-1, Nova Pro model
+#    access enabled in Bedrock, Python 3.12 + Node 18 available.
+aws configure set region eu-north-1
+aws sts get-caller-identity                 # confirm account & creds
+
+# 1. Provision AWS resources (IAM role, Cognito, guardrail) + install deps
+chmod +x setup.sh deploy.sh deploy-frontend.sh
+./setup.sh
+
+# 2. Verify the backend is green before deploying
+source .venv/bin/activate && python -m pytest
+
+# 3. Deploy the agent to AgentCore (builds/pushes container, rewrites .env.local)
+./deploy.sh
+
+# 4. Deploy the frontend to Amplify (manual static-export upload)
+./deploy-frontend.sh
+
+# --- OR, instead of step 4, use the Git-based Amplify build (steps 5-7) ---
+
+# 5. Create the CodeCommit repo (once) and push
+pipx install git-remote-codecommit        # one-time: CodeCommit git helper
+aws codecommit create-repository --repository-name finance-advisor-frontend --region eu-north-1
+git push origin main
+
+# 6. In the Amplify console: New app -> Host web app -> AWS CodeCommit ->
+#    pick finance-advisor-frontend + main branch (auto-detects amplify.yml,
+#    which pins Node 18 for the build).
+
+# 7. Set NEXT_PUBLIC_* env vars in Amplify (AgentCore endpoint from step 3,
+#    plus Cognito pool/client/region) and trigger a build.
+
+# Teardown: remove all AWS resources
+./cleanup.sh
+```
+
+---
+
 ## Backend (Python)
 
 ### Prerequisites
@@ -186,7 +229,7 @@ Key code fixes applied during deployment to AgentCore:
 - `request_factory.py` - BedrockModel initialized via `_get_bedrock_model()` function (not module-level)
 
 ### Authentication fix
-- `frontend/src/lib/auth.ts` - `getAccessToken()` returns `idToken` instead of `accessToken` (AgentCore JWT authorizer validates the `aud` claim, which only exists in Cognito ID tokens)
+- `frontend/src/lib/auth.ts` - `getIdToken()` returns the Cognito `idToken` as the bearer (AgentCore JWT authorizer validates the `aud` claim, which only exists in Cognito ID tokens)
 
 ### SSE streaming fix
 - `frontend/src/lib/agent.ts` - `finalize()` treats stream end without `[DONE]` marker as normal completion (AgentCore does not send `[DONE]`)
@@ -198,10 +241,11 @@ Key code fixes applied during deployment to AgentCore:
 - `Dockerfile` - Added `apt-get update && apt-get upgrade` to patch system CVEs (perl, gnutls28, openssl)
 
 ### Error handling
-- `main.py` - Staging error handler returns detailed error: `f"Error: {type(exc).__name__}: {str(exc)[:200]}"`
+- `main.py` - Safe-by-default: unhandled exceptions return a generic `"An internal error occurred. Please try again."` to the client. Set `DEBUG_ERRORS=1` to opt into the detailed `f"Error: {type(exc).__name__}: {str(exc)[:200]}"` for staging debugging. Full detail is always written to the logs regardless.
 
 ### Script fixes
-- `deploy.sh` / `deploy-frontend.sh` - Changed `python` to `python3`, updated execution_role to use CDK-created role
+- `deploy.sh` / `deploy-frontend.sh` / `setup.sh` / `cleanup.sh` - Standardized inline Python invocations to `python3` and hardened shell→Python heredocs (values passed via the environment instead of string interpolation)
+- `deploy.sh` - On a fresh account, `execution_role` uses the setup-created role `AmazonBedrockAgentCoreSDKRuntime-<region>`. (The live staging environment above was provisioned via CDK and therefore shows the CDK-created role `agentcore-execution-personal_finance_agent-staging`.)
 
 ### Testing
 - `conftest.py` - Root-level conftest that mocks `bedrock_agentcore` for local pytest runs

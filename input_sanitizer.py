@@ -84,6 +84,19 @@ class InputSanitizer:
         Returns:
             SanitizationResult indicating pass/fail with optional error details.
         """
+        # Type guard: fail CLOSED on missing/None/non-string input. A malformed
+        # client payload (missing "prompt", null, or a non-string value) must be
+        # rejected here rather than crashing len()/pattern.search() downstream.
+        if not isinstance(user_input, str):
+            self._log_rejection("", "type")
+            return SanitizationResult(
+                is_valid=False,
+                error_message=(
+                    "Your message could not be processed due to policy violation"
+                ),
+                rejection_category="type",
+            )
+
         # Length check first
         if len(user_input) > self.MAX_LENGTH:
             self._log_rejection(user_input, "length")

@@ -77,7 +77,7 @@ async def invoke(payload):
     4. Stream response via request factory (per-request isolation) - Req 1.1, 1.4
     5. Handle Bedrock Guardrails PROMPT_ATTACK with generic refusal - Req 9.4
     """
-    user_message = payload["prompt"]
+    user_message = payload.get("prompt")
     actor_id = payload.get("actor_id", "default_user")
     session_id = payload.get("session_id", str(uuid.uuid4()))
 
@@ -95,7 +95,9 @@ async def invoke(payload):
     # Stream response via request factory - Requirements 1.1, 1.4, 9.4
     # The request factory handles Bedrock Guardrail PROMPT_ATTACK responses internally,
     # returning a generic refusal message without leaking guardrail configuration.
-    memory_id = os.environ.get('AGENTCORE_MEMORY_ID')
+    # Normalize empty string ("" from a fresh-account deploy with no memory) to None
+    # so create_request_context cleanly skips memory lookup/store.
+    memory_id = os.environ.get('AGENTCORE_MEMORY_ID') or None
     try:
         async for chunk in create_request_context(user_message, actor_id, session_id, memory_id):
             yield chunk
@@ -116,8 +118,13 @@ async def invoke(payload):
                 str(exc),
                 exc_info=True,
             )
-            # Include error details in response for debugging during staging
-            yield f"Error: {type(exc).__name__}: {str(exc)[:200]}"
+            # Safe-by-default: return a generic message to the client. Detailed
+            # exception type/message are only emitted when DEBUG_ERRORS=1 is set
+            # (opt-in for staging debugging). The full detail is always logged above.
+            if os.environ.get("DEBUG_ERRORS") == "1":
+                yield f"Error: {type(exc).__name__}: {str(exc)[:200]}"
+            else:
+                yield "An internal error occurred. Please try again."
 
 
 if __name__ == "__main__":

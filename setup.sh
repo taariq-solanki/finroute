@@ -139,7 +139,7 @@ echo ""
 # ----------------------------------------------------------------------------
 echo "━━━ Step 4: Setting up Bedrock Guardrail ━━━"
 
-python -c "
+python3 -c "
 from utils.guardrail import create_guardrail
 result = create_guardrail()
 if result:
@@ -155,7 +155,7 @@ echo ""
 # ----------------------------------------------------------------------------
 echo "━━━ Step 5: Setting up Cognito authentication ━━━"
 
-COGNITO_OUTPUT=$(python -c "
+COGNITO_OUTPUT=$(python3 -c "
 import json
 from utils.agentcore_utils import setup_cognito_user_pool
 result = setup_cognito_user_pool()
@@ -163,11 +163,11 @@ if result:
     print(json.dumps(result))
 " 2>/dev/null || echo "")
 
-if [ -n "$COGNITO_OUTPUT" ] && echo "$COGNITO_OUTPUT" | python -c "import sys,json; json.load(sys.stdin)" 2>/dev/null; then
-    POOL_ID=$(echo "$COGNITO_OUTPUT" | python -c "import sys,json; print(json.load(sys.stdin)['pool_id'])")
-    CLIENT_ID=$(echo "$COGNITO_OUTPUT" | python -c "import sys,json; print(json.load(sys.stdin)['client_id'])")
-    USERNAME=$(echo "$COGNITO_OUTPUT" | python -c "import sys,json; print(json.load(sys.stdin)['username'])")
-    PASSWORD=$(echo "$COGNITO_OUTPUT" | python -c "import sys,json; print(json.load(sys.stdin)['password'])")
+if [ -n "$COGNITO_OUTPUT" ] && echo "$COGNITO_OUTPUT" | python3 -c "import sys,json; json.load(sys.stdin)" 2>/dev/null; then
+    POOL_ID=$(echo "$COGNITO_OUTPUT" | python3 -c "import sys,json; print(json.load(sys.stdin)['pool_id'])")
+    CLIENT_ID=$(echo "$COGNITO_OUTPUT" | python3 -c "import sys,json; print(json.load(sys.stdin)['client_id'])")
+    USERNAME=$(echo "$COGNITO_OUTPUT" | python3 -c "import sys,json; print(json.load(sys.stdin)['username'])")
+    # Password intentionally not extracted/echoed — it lives in Secrets Manager only.
     echo "✓ Cognito User Pool created"
     echo "  Pool ID: $POOL_ID"
     echo "  Client ID: $CLIENT_ID"

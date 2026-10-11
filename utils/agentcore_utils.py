@@ -117,22 +117,22 @@ def setup_cognito_user_pool():
             print(f"Warning: Could not store credentials in Secrets Manager: {e}")
             print("Credentials will only be displayed below.")
         
-        # Output the required values
+        # Output non-secret identifiers only. The password and bearer token are
+        # intentionally NOT printed to stdout to avoid leaking credentials into
+        # terminal scrollback / CI logs; both are available via Secrets Manager.
         print("\n" + "="*70)
-        print("⚠️  IMPORTANT: SAVE THESE CREDENTIALS NOW!")
+        print("✓ Cognito user provisioned. Credentials stored in Secrets Manager.")
         print("="*70)
         print(f"Username: {username}")
-        print(f"Password: {permanent_password}")
         print(f"Secret Name: {secret_name}")
         print(f"Pool ID: {pool_id}")
         print(
             f"Discovery URL: https://cognito-idp.{region}.amazonaws.com/{pool_id}/.well-known/openid-configuration"
         )
         print(f"Client ID: {client_id}")
-        print(f"Bearer Token: {bearer_token}")
         print("="*70)
-        print("⚠️  These credentials will NOT be shown again!")
-        print("    Retrieve them later using: retrieve_credentials_from_secrets_manager()")
+        print("⚠️  The password and bearer token are NOT shown for security.")
+        print("    Retrieve them with: retrieve_credentials_from_secrets_manager()")
         print("="*70 + "\n")
 
         # Return values if needed for further processing

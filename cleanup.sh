@@ -37,9 +37,9 @@ echo ""
 # ----------------------------------------------------------------------------
 echo "━━━ Step 1: Deleting AgentCore Runtime ━━━"
 
-python -c "
-import boto3
-client = boto3.client('bedrock-agentcore-control', region_name='$REGION')
+REGION="$REGION" python3 -c "
+import os, boto3
+client = boto3.client('bedrock-agentcore-control', region_name=os.environ['REGION'])
 try:
     runtimes = client.list_agent_runtimes()
     for rt in runtimes.get('agentRuntimes', []):
@@ -58,7 +58,7 @@ echo ""
 # ----------------------------------------------------------------------------
 echo "━━━ Step 2: Deleting Bedrock Guardrail ━━━"
 
-python -c "
+python3 -c "
 from utils.guardrail import delete_guardrail
 delete_guardrail()
 " 2>/dev/null || echo "  ⚠️  Guardrail cleanup skipped"
@@ -70,18 +70,13 @@ echo ""
 # ----------------------------------------------------------------------------
 echo "━━━ Step 3: Deleting Cognito User Pool ━━━"
 
-python -c "
+# Delete ONLY the project's exact pool ("agentpool"). A substring sweep over all
+# pools (matching 'finance'/'agentcore') was removed: on a shared account it could
+# delete unrelated projects' pools. delete_cognito_user_pool() finds 'agentpool' by
+# exact name.
+python3 -c "
 from utils.agentcore_utils import delete_cognito_user_pool
 delete_cognito_user_pool()
-# Also clean any other pools created by this project
-import boto3
-client = boto3.client('cognito-idp', region_name='$REGION')
-pools = client.list_user_pools(MaxResults=20)
-for pool in pools.get('UserPools', []):
-    if 'agentcore' in pool['Name'].lower() or 'finance' in pool['Name'].lower():
-        print(f'  Deleting pool: {pool[\"Name\"]} ({pool[\"Id\"]})')
-        client.delete_user_pool(UserPoolId=pool['Id'])
-        print(f'  ✓ Deleted')
 " 2>/dev/null || echo "  ⚠️  Cognito cleanup skipped"
 
 echo ""
@@ -153,7 +148,9 @@ echo ""
 # ----------------------------------------------------------------------------
 echo "━━━ Step 6: Cleaning up ECR ━━━"
 
-for REPO in $(aws ecr describe-repositories --region "$REGION" --query 'repositories[?contains(repositoryName, `bedrock-agentcore`)].repositoryName' --output text 2>/dev/null); do
+# Match the project's own repo prefix (toolkit names it
+# bedrock-agentcore-personal_finance_agent*), not every bedrock-agentcore repo.
+for REPO in $(aws ecr describe-repositories --region "$REGION" --query 'repositories[?contains(repositoryName, `bedrock-agentcore-personal_finance_agent`)].repositoryName' --output text 2>/dev/null); do
     echo "  Deleting ECR repo: $REPO"
     aws ecr delete-repository --repository-name "$REPO" --force --region "$REGION" 2>/dev/null && \
         echo "  ✓ Deleted" || echo "  ⚠️  Could not delete"
@@ -166,7 +163,8 @@ echo ""
 # ----------------------------------------------------------------------------
 echo "━━━ Step 7: Cleaning up CodeBuild ━━━"
 
-for PROJECT in $(aws codebuild list-projects --region "$REGION" --query 'projects' --output text 2>/dev/null | tr '\t' '\n' | grep "bedrock-agentcore"); do
+# Match the project's own CodeBuild project prefix only, not every bedrock-agentcore project.
+for PROJECT in $(aws codebuild list-projects --region "$REGION" --query 'projects' --output text 2>/dev/null | tr '\t' '\n' | grep "bedrock-agentcore-personal_finance_agent"); do
     echo "  Deleting project: $PROJECT"
     aws codebuild delete-project --name "$PROJECT" --region "$REGION" 2>/dev/null && \
         echo "  ✓ Deleted" || echo "  ⚠️  Could not delete"
@@ -179,7 +177,9 @@ echo ""
 # ----------------------------------------------------------------------------
 echo "━━━ Step 8: Cleaning up Amplify ━━━"
 
-for APP_ID in $(aws amplify list-apps --region "$REGION" --query "apps[?contains(name, 'finance-advisor')].appId" --output text 2>/dev/null); do
+# Match the exact app name created by deploy-frontend.sh (APP_NAME="finance-advisor-ui"),
+# not any app whose name merely contains "finance-advisor".
+for APP_ID in $(aws amplify list-apps --region "$REGION" --query "apps[?name=='finance-advisor-ui'].appId" --output text 2>/dev/null); do
     echo "  Deleting Amplify app: $APP_ID"
     aws amplify delete-app --app-id "$APP_ID" --region "$REGION" 2>/dev/null && \
         echo "  ✓ Deleted" || echo "  ⚠️  Could not delete"
@@ -202,9 +202,9 @@ echo ""
 # ----------------------------------------------------------------------------
 echo "━━━ Step 10: Cleaning up Secrets Manager ━━━"
 
-python -c "
-import boto3
-client = boto3.client('secretsmanager', region_name='$REGION')
+REGION="$REGION" python3 -c "
+import os, boto3
+client = boto3.client('secretsmanager', region_name=os.environ['REGION'])
 try:
     secrets = client.list_secrets(
         Filters=[{'Key': 'name', 'Values': ['agentcore-project-credentials']}]

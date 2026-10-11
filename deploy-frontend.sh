@@ -59,11 +59,14 @@ echo "━━━ Step 2: Deploying to Amplify ━━━"
 
 cd "$PROJECT_DIR"
 
+# Values are passed via the environment (not string-spliced into Python literals)
+# so a stray quote/newline in a derived value cannot break or inject the heredoc.
+export REGION APP_NAME AGENTCORE_ENDPOINT COGNITO_USER_POOL_ID COGNITO_CLIENT_ID
 python3 -c "
 import boto3, zipfile, os, requests, sys
 
-region = '$REGION'
-app_name = '$APP_NAME'
+region = os.environ['REGION']
+app_name = os.environ['APP_NAME']
 
 client = boto3.client('amplify', region_name=region)
 
@@ -81,9 +84,9 @@ if not app_id:
         name=app_name,
         platform='WEB',
         environmentVariables={
-            'NEXT_PUBLIC_AGENTCORE_ENDPOINT': '$AGENTCORE_ENDPOINT',
-            'NEXT_PUBLIC_COGNITO_USER_POOL_ID': '$COGNITO_USER_POOL_ID',
-            'NEXT_PUBLIC_COGNITO_CLIENT_ID': '$COGNITO_CLIENT_ID',
+            'NEXT_PUBLIC_AGENTCORE_ENDPOINT': os.environ['AGENTCORE_ENDPOINT'],
+            'NEXT_PUBLIC_COGNITO_USER_POOL_ID': os.environ['COGNITO_USER_POOL_ID'],
+            'NEXT_PUBLIC_COGNITO_CLIENT_ID': os.environ['COGNITO_CLIENT_ID'],
             'NEXT_PUBLIC_COGNITO_REGION': region
         },
         customRules=[
@@ -124,11 +127,20 @@ print('✓ Artifacts uploaded')
 result = client.start_deployment(appId=app_id, branchName='main', jobId=job_id)
 print(f'✓ Deployment started (Job ID: {job_id})')
 
-# Wait for completion
+# Wait for completion.
+# Cap total polling so a job stuck in PENDING/RUNNING cannot hang the script
+# forever. Non-SUCCEED terminal states (FAILED/CANCELLED/PROVISION_FAILED) leave
+# the loop naturally and are reported by the branch below.
 import time
+MAX_POLLS = 60  # 60 x 10s = ~10 minutes
 status = 'PENDING'
+polls = 0
 while status in ('PENDING', 'RUNNING'):
+    if polls >= MAX_POLLS:
+        print(f'❌ Deployment did not finish within {MAX_POLLS * 10 // 60} minutes (last status: {status})')
+        sys.exit(1)
     time.sleep(10)
+    polls += 1
     job = client.get_job(appId=app_id, branchName='main', jobId=job_id)
     status = job['job']['summary']['status']
     print(f'  Status: {status}')
