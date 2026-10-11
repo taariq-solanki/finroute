@@ -66,10 +66,16 @@ fi
 source .venv/bin/activate
 echo "✓ Virtual environment activated"
 
-# Install dependencies
+# Ensure pip exists in the venv (some Python builds don't seed it automatically)
+if ! python -m pip --version &> /dev/null; then
+    echo "  Bootstrapping pip into the virtual environment..."
+    python -m ensurepip --upgrade &> /dev/null || $PYTHON_BIN -m venv --with-pip --upgrade-deps .venv
+fi
+
+# Install dependencies (use `python -m pip` so it always targets the venv)
 echo "  Installing Python dependencies..."
-pip install --quiet --upgrade pip
-pip install --quiet -r requirements.txt
+python -m pip install --quiet --upgrade pip
+python -m pip install --quiet -r requirements.txt
 echo "✓ Python dependencies installed"
 
 echo ""
@@ -155,18 +161,27 @@ echo ""
 # ----------------------------------------------------------------------------
 echo "━━━ Step 5: Setting up Cognito authentication ━━━"
 
-COGNITO_OUTPUT=$(python3 -c "
+# The function prints a human-readable banner to stdout, so we cannot parse
+# raw stdout as JSON. Emit a uniquely-marked single JSON line and extract only
+# that line — robust against any banner/log output the function produces.
+COGNITO_RAW=$(python3 -c "
 import json
 from utils.agentcore_utils import setup_cognito_user_pool
 result = setup_cognito_user_pool()
 if result:
-    print(json.dumps(result))
-" 2>/dev/null || echo "")
+    print('__COGNITO_JSON__' + json.dumps({
+        'pool_id': result['pool_id'],
+        'client_id': result['client_id'],
+        'username': result['username'],
+    }))
+" || echo "")
 
-if [ -n "$COGNITO_OUTPUT" ] && echo "$COGNITO_OUTPUT" | python3 -c "import sys,json; json.load(sys.stdin)" 2>/dev/null; then
-    POOL_ID=$(echo "$COGNITO_OUTPUT" | python3 -c "import sys,json; print(json.load(sys.stdin)['pool_id'])")
-    CLIENT_ID=$(echo "$COGNITO_OUTPUT" | python3 -c "import sys,json; print(json.load(sys.stdin)['client_id'])")
-    USERNAME=$(echo "$COGNITO_OUTPUT" | python3 -c "import sys,json; print(json.load(sys.stdin)['username'])")
+COGNITO_JSON=$(echo "$COGNITO_RAW" | grep '^__COGNITO_JSON__' | sed 's/^__COGNITO_JSON__//' | head -n1)
+
+if [ -n "$COGNITO_JSON" ]; then
+    POOL_ID=$(echo "$COGNITO_JSON" | python3 -c "import sys,json; print(json.load(sys.stdin)['pool_id'])")
+    CLIENT_ID=$(echo "$COGNITO_JSON" | python3 -c "import sys,json; print(json.load(sys.stdin)['client_id'])")
+    USERNAME=$(echo "$COGNITO_JSON" | python3 -c "import sys,json; print(json.load(sys.stdin)['username'])")
     # Password intentionally not extracted/echoed — it lives in Secrets Manager only.
     echo "✓ Cognito User Pool created"
     echo "  Pool ID: $POOL_ID"
@@ -174,10 +189,10 @@ if [ -n "$COGNITO_OUTPUT" ] && echo "$COGNITO_OUTPUT" | python3 -c "import sys,j
     echo "  Username: $USERNAME"
     echo "  ⚠️  Password saved to AWS Secrets Manager"
 else
-    echo "⚠️  Cognito setup skipped (may already exist)"
-    echo "  Using existing values from .env.local"
-    POOL_ID=$(grep COGNITO_USER_POOL_ID "$PROJECT_DIR/frontend/.env.local" 2>/dev/null | cut -d= -f2)
-    CLIENT_ID=$(grep COGNITO_CLIENT_ID "$PROJECT_DIR/frontend/.env.local" 2>/dev/null | cut -d= -f2)
+    echo "❌ Cognito setup failed — no pool was created."
+    echo "   Re-run after checking AWS Cognito/Bedrock permissions; do NOT"
+    echo "   proceed to deploy with stale .env.local values."
+    exit 1
 fi
 
 echo ""
