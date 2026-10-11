@@ -5,6 +5,10 @@ applications:
       phases:
         preBuild:
           commands:
+            # Pin Node 18 for a deterministic build. Next.js 12.3.4 bundles an old
+            # jsonwebtoken that crashes on very new Node (e.g. v26); Node 18 is the
+            # version this project was written against (@types/node 18.x).
+            - nvm use 18 || nvm install 18
             - npm ci
         build:
           commands:

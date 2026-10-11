@@ -1,5 +1,6 @@
 import ReactMarkdown from "react-markdown";
 import type { ChatMessage as ChatMessageType } from "../lib/agent";
+import { sanitizeHtml } from "../lib/sanitizer";
 
 interface ChatMessageProps {
   message: ChatMessageType;
@@ -14,7 +15,7 @@ export default function ChatMessage({ message }: ChatMessageProps) {
         {isUser ? (
           <p style={{ whiteSpace: "pre-wrap" }}>{message.content}</p>
         ) : (
-          <ReactMarkdown>{message.content || ""}</ReactMarkdown>
+          <ReactMarkdown>{sanitizeHtml(message.content || "")}</ReactMarkdown>
         )}
         <p className="message-time">
           {message.timestamp.toLocaleTimeString([], {

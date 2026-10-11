@@ -1,8 +1,23 @@
-# Configure AWS clients
-import boto3
+# Configure AWS clients - lazy initialization to avoid import-time failures
+# in AgentCore containers where credentials may not be ready at import time.
+from config import create_boto3_client
 
-bedrock_client = boto3.client("bedrock")
-bedrock_runtime = boto3.client("bedrock-runtime")
+_bedrock_client = None
+_bedrock_runtime = None
+
+
+def _get_bedrock_client():
+    global _bedrock_client
+    if _bedrock_client is None:
+        _bedrock_client = create_boto3_client("bedrock")
+    return _bedrock_client
+
+
+def _get_bedrock_runtime():
+    global _bedrock_runtime
+    if _bedrock_runtime is None:
+        _bedrock_runtime = create_boto3_client("bedrock-runtime")
+    return _bedrock_runtime
 
 
 def create_guardrail():
@@ -10,7 +25,7 @@ def create_guardrail():
 
     # Check if guardrail already exists
     try:
-        existing_guardrails = bedrock_client.list_guardrails()
+        existing_guardrails = _get_bedrock_client().list_guardrails()
         for guardrail in existing_guardrails.get("guardrails", []):
             if guardrail.get("name") == guardrail_name:
                 print(
@@ -22,7 +37,7 @@ def create_guardrail():
 
     # Create new guardrail if it doesn't exist
     print(f"Creating new guardrail '{guardrail_name}'...")
-    response = bedrock_client.create_guardrail(
+    response = _get_bedrock_client().create_guardrail(
         name=guardrail_name,
         description="Prevents the model from providing Bitcoin investment advice.",
         contentPolicyConfig={
@@ -79,7 +94,7 @@ def delete_guardrail(guardrail_id=None):
     try:
         # If no ID provided, find it by name
         if not guardrail_id:
-            existing_guardrails = bedrock_client.list_guardrails()
+            existing_guardrails = _get_bedrock_client().list_guardrails()
             for guardrail in existing_guardrails.get("guardrails", []):
                 if guardrail.get("name") == guardrail_name:
                     guardrail_id = guardrail.get("id")
@@ -91,7 +106,7 @@ def delete_guardrail(guardrail_id=None):
         
         # Delete the guardrail
         print(f"Deleting guardrail '{guardrail_name}' with ID: {guardrail_id}")
-        bedrock_client.delete_guardrail(guardrailIdentifier=guardrail_id)
+        _get_bedrock_client().delete_guardrail(guardrailIdentifier=guardrail_id)
         print(f"Successfully deleted guardrail: {guardrail_name}")
         return True
         
@@ -102,22 +117,27 @@ def delete_guardrail(guardrail_id=None):
 
 def get_guardrail_id():
     """
-    Get the guardrail ID for the Bitcoin advice guardrail.
+    Get the guardrail ID for the finance advisor guardrail.
+    Looks for both the CDK-created name and the original manual name.
     
     Returns:
         str or None: The guardrail ID if found, None otherwise
     """
-    guardrail_name = "guardrail-no-bitcoin-advice"
+    guardrail_names = [
+        "finance-advisor-guardrail-staging",
+        "finance-advisor-guardrail-production",
+        "guardrail-no-bitcoin-advice",
+    ]
     
     try:
-        existing_guardrails = bedrock_client.list_guardrails()
+        existing_guardrails = _get_bedrock_client().list_guardrails()
         for guardrail in existing_guardrails.get("guardrails", []):
-            if guardrail.get("name") == guardrail_name:
+            if guardrail.get("name") in guardrail_names:
                 guardrail_id = guardrail.get("id")
-                print(f"Found guardrail '{guardrail_name}' with ID: {guardrail_id}")
+                print(f"Found guardrail '{guardrail.get('name')}' with ID: {guardrail_id}")
                 return guardrail_id
         
-        print(f"Guardrail '{guardrail_name}' not found")
+        print(f"No matching guardrail found (searched: {guardrail_names})")
         return None
         
     except Exception as e:

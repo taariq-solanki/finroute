@@ -6,9 +6,15 @@ __pycache__/
 *.zip
 .vscode/
 .kiro/
+.bedrock_agentcore.yaml
 
 # Frontend
 frontend/node_modules/
 frontend/.next/
 frontend/out/
 frontend/.env.local
+
+# Agent workflow reports (local only)
+.agents/
+frontend/.agents-plan/
+frontend/tsconfig.tsbuildinfo

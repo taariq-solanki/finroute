@@ -59,7 +59,7 @@ echo "━━━ Step 2: Deploying to Amplify ━━━"
 
 cd "$PROJECT_DIR"
 
-python -c "
+python3 -c "
 import boto3, zipfile, os, requests, sys
 
 region = '$REGION'

@@ -1,0 +1,64 @@
+[project]
+name = "multi-agent-financial-advisor"
+version = "1.0.0"
+description = "Multi-Agent Financial Advisor - Production Backend"
+requires-python = ">=3.12"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+asyncio_mode = "auto"
+markers = [
+    "unit: mark test as a unit test",
+    "integration: mark test as an integration test",
+    "property: mark test as a property-based test (uses hypothesis)",
+    "slow: mark test as slow-running",
+]
+filterwarnings = [
+    "ignore::DeprecationWarning",
+    "ignore::PendingDeprecationWarning",
+]
+
+[tool.hypothesis]
+# Default profile: 100 examples for CI
+# Configured via conftest.py settings() decorator and profiles
+
+[tool.coverage.run]
+source = [
+    "main",
+    "budget_agent",
+    "financial_analysis_agent",
+    "utils",
+    "config",
+    "input_sanitizer",
+    "request_factory",
+]
+omit = [
+    "tests/*",
+    ".venv/*",
+    "*.ipynb",
+]
+
+[tool.coverage.report]
+fail_under = 80
+show_missing = true
+precision = 2
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "if __name__ == .__main__.",
+    "raise NotImplementedError",
+    "pass",
+    "except ImportError",
+]
+
+[tool.coverage.html]
+directory = "htmlcov"
+
+[tool.mypy]
+python_version = "3.12"
+warn_return_any = true
+warn_unused_configs = true
+ignore_missing_imports = true

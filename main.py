@@ -1,22 +1,21 @@
-# Create AgentCore-compatible deployment file with streaming endpoint and memory integration
+# Production-hardened AgentCore entrypoint with thread-safe request handling,
+# input sanitization, and startup validation.
+#
+# Requirements: 1.1, 1.4, 9.1, 9.2, 9.3, 9.4, 9.6, 10.5
 
-from strands import Agent, tool
-from strands.models import BedrockModel
-from strands.agent.conversation_manager import SummarizingConversationManager
+from strands import tool
 
 from budget_agent import FinancialReport, budget_agent
 from financial_analysis_agent import financial_analysis_agent
 from bedrock_agentcore import BedrockAgentCoreApp
-from bedrock_agentcore.memory import MemoryClient
 
-from utils import get_guardrail_id
+from config import validate_startup
+from request_factory import create_request_context, register_tools, GUARDRAIL_REFUSAL_MESSAGE
+from input_sanitizer import InputSanitizer
+
 import uuid
 import os
 import logging
-import boto3
-
-# Get the current AWS region dynamically
-region = boto3.Session().region_name
 
 # Configure logging for error tracking and debugging
 logging.basicConfig(
@@ -27,41 +26,6 @@ logger = logging.getLogger(__name__)
 
 # Initialize AgentCore app
 app = BedrockAgentCoreApp()
-
-ORCHESTRATOR_PROMPT = """You are a comprehensive financial advisor orchestrator that coordinates between specialized financial agents to provide complete financial guidance. 
-
-Your specialized agents are:
-1. **budget_agent**: Handles budgeting, spending analysis, savings recommendations, and expense tracking
-2. **financial_analysis_agent_tool**: Handles investment analysis, stock research, portfolio creation, and performance comparisons
-
-Guidelines for using your agents:
-- Use **budget_agent** for questions about: budgets, spending habits, expense tracking, savings goals, debt management
-- Use **financial_analysis_agent_tool** for questions about: stocks, investments, portfolios, market analysis, investment recommendations
-- You can use both agents together for comprehensive financial planning
-- Always provide a cohesive summary that combines insights from multiple agents when applicable
-- Maintain a helpful, professional tone and include appropriate disclaimers about financial advice
-
-When a user asks a question:
-1. Determine which agent(s) are most appropriate
-2. Call the relevant agent(s) with focused queries
-3. Synthesize the responses into a coherent, comprehensive answer
-4. Provide actionable next steps when possible"""
-
-# Add conversation management to maintain context
-conversation_manager = SummarizingConversationManager(
-    summary_ratio=0.3,  # Summarize 30% of messages when context reduction is needed
-    preserve_recent_messages=5,  # Always keep 5 most recent messages
-)
-
-# Configure Bedrock model
-bedrock_model = BedrockModel(
-    model_id="eu.amazon.nova-pro-v1:0",
-    region_name=region,
-    temperature=0.0,  # Deterministic responses for financial advice
-    guardrail_id=get_guardrail_id(),
-    guardrail_version="DRAFT",
-    guardrail_trace="enabled",
-)
 
 
 @tool
@@ -76,7 +40,6 @@ def budget_agent_tool(query: str) -> FinancialReport:
         return structured_response
     except Exception as e:
         logger.error(f"Error in budget_agent_tool: {e}", exc_info=True)
-        # Return a default structured response on error
         return FinancialReport(
             monthly_income=0.0,
             budget_categories=[],
@@ -98,69 +61,68 @@ def financial_analysis_agent_tool(query: str) -> str:
         return f"❌ Financial analysis error: {str(e)}"
 
 
-# Initialize orchestrator agent at module level
-logger.info("Initializing orchestrator agent...")
-orchestrator_agent = Agent(
-    model=bedrock_model,
-    system_prompt=ORCHESTRATOR_PROMPT,
-    tools=[budget_agent_tool, financial_analysis_agent_tool],
-    conversation_manager=conversation_manager,
-)
-logger.info("Orchestrator agent initialized successfully")
+# Register tools with the request factory (breaks circular import)
+register_tools([budget_agent_tool, financial_analysis_agent_tool])
+logger.info("Application tools registered with request factory")
 
 
 @app.entrypoint
 async def invoke(payload):
-    """Your AI agent function with memory integration"""
+    """AI agent entrypoint with input sanitization and thread-safe request handling.
+
+    Flow:
+    1. Extract request parameters from payload
+    2. Validate input via InputSanitizer (before guardrails) - Req 9.3, 9.6
+    3. Return error with sanitized message on validation failure - Req 9.1, 9.2
+    4. Stream response via request factory (per-request isolation) - Req 1.1, 1.4
+    5. Handle Bedrock Guardrails PROMPT_ATTACK with generic refusal - Req 9.4
+    """
     user_message = payload["prompt"]
-    actor_id = payload.get("actor_id", "default_user")  # User identifier
-    session_id = payload.get("session_id", str(uuid.uuid4()))  # Session identifier
+    actor_id = payload.get("actor_id", "default_user")
+    session_id = payload.get("session_id", str(uuid.uuid4()))
 
-    # Retrieve relevant memories before processing
+    # Input sanitization (before guardrails) - Requirements 9.3, 9.6
+    # This layered defense applies pattern-based filtering prior to model-level guardrails
+    sanitizer = InputSanitizer()
+    result = sanitizer.validate(user_message)
+    if not result.is_valid:
+        # Return HTTP 400 equivalent with appropriate error message
+        # Req 9.1: injection patterns -> "Your message could not be processed due to policy violation"
+        # Req 9.2: length exceeded -> "Message exceeds maximum length of 4000 characters"
+        yield f"Error: {result.error_message}"
+        return
+
+    # Stream response via request factory - Requirements 1.1, 1.4, 9.4
+    # The request factory handles Bedrock Guardrail PROMPT_ATTACK responses internally,
+    # returning a generic refusal message without leaking guardrail configuration.
     memory_id = os.environ.get('AGENTCORE_MEMORY_ID')
-    if memory_id:
-        try:
-            memory_client = MemoryClient()
-            # Query relevant memories for context
-            relevant_memories = memory_client.query_records(
-                memory_id=memory_id,
-                query=user_message,
-                namespace=f"finance/user/{actor_id}/facts",
-                max_results=5
-            )
-
-            # Add memory context to system prompt if available
-            if relevant_memories:
-                memory_context = "\n\nRelevant user information from previous conversations:\n"
-                for record in relevant_memories:
-                    memory_context += f"- {record.get('content', '')}\n"
-
-                # Enhance agent with memory context
-                enhanced_prompt = ORCHESTRATOR_PROMPT + memory_context
-                orchestrator_agent.system_prompt = enhanced_prompt
-        except Exception as e:
-            logger.warning(f"Error retrieving memories: {e}")
-
-    # Stream response
-    full_response = ""
-    async for event in orchestrator_agent.stream_async(user_message):
-        if "data" in event:
-            chunk = event["data"]
-            full_response += chunk
+    try:
+        async for chunk in create_request_context(user_message, actor_id, session_id, memory_id):
             yield chunk
-
-    # Store conversation in memory after response
-    if memory_id:
-        try:
-            memory_client.create_event(
-                memory_id=memory_id,
-                actor_id=actor_id,
-                session_id=session_id,
-                content=f"User: {user_message}\nAssistant: {full_response}"
+    except Exception as exc:
+        # Catch any unhandled exceptions from the request pipeline.
+        # Check for guardrail-related exceptions that may have propagated.
+        exc_str = str(exc).lower()
+        if "guardrail" in exc_str or "prompt_attack" in exc_str:
+            logger.warning(
+                "Guardrail intervention caught at entrypoint for actor_id=%s",
+                actor_id,
             )
-        except Exception as e:
-            logger.warning(f"Error storing memory: {e}")
+            yield GUARDRAIL_REFUSAL_MESSAGE
+        else:
+            logger.error(
+                "Unhandled exception in invoke for actor_id=%s: %s",
+                actor_id,
+                str(exc),
+                exc_info=True,
+            )
+            # Include error details in response for debugging during staging
+            yield f"Error: {type(exc).__name__}: {str(exc)[:200]}"
 
 
 if __name__ == "__main__":
+    import asyncio
+    # Validate startup (region + guardrail accessibility) before accepting requests
+    # Requirement 10.5
+    asyncio.run(validate_startup())
     app.run()

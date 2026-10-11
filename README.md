@@ -1,7 +1,25 @@
-# Financial Advisor — Multi-Agent AI Platform
+# Financial Advisor - Multi-Agent AI Platform
 
 AI-powered financial assistant built on AWS Bedrock AgentCore with a Next.js frontend.
-NEXT Insurance branding · Powered by CloudAge.
+NEXT Insurance branding - Powered by CloudAge.
+
+---
+
+## Current Deployment (Staging)
+
+| Resource | Value |
+|----------|-------|
+| AgentCore Runtime | `personal_finance_agent-mc5EysEAKi` |
+| Memory | `personal_finance_agent_mem-35VQoI2mZl` (STM_ONLY) |
+| Cognito Pool | `eu-north-1_3CoCO4SDy` |
+| Cognito Client | `33rn8bdj5b8g7rusoqe2s7agfn` |
+| Amplify App | `d3jywevc7tu25i` |
+| Frontend URL | https://main.d3jywevc7tu25i.amplifyapp.com |
+| CDK Stack | `ProductionHardening-Staging` |
+| IAM Role | `agentcore-execution-personal_finance_agent-staging` |
+| Guardrail | `g8sr2bf9cymw` (`finance-advisor-guardrail-staging`) |
+| Region | `eu-north-1` |
+| WAF WebACL | Deployed but NOT associated (eu-north-1 lacks Amplify Firewall) |
 
 ---
 
@@ -11,7 +29,7 @@ NEXT Insurance branding · Powered by CloudAge.
 - Python 3.12 (`brew install python@3.12` on macOS)
 - AWS CLI v2 configured with `eu-north-1` region (`aws configure set region eu-north-1`)
 - AWS account with the following enabled:
-  - Amazon Nova Pro model access in Bedrock (eu-north-1) — enable via AWS Console → Bedrock → Model access
+  - Amazon Nova Pro model access in Bedrock (eu-north-1) - enable via AWS Console -> Bedrock -> Model access
   - Permissions to create: IAM roles, Cognito user pools, ECR repos, CodeBuild projects, Secrets Manager secrets, Amplify apps, Bedrock AgentCore runtimes
 - Node.js v18+ (for frontend)
 - No Docker required (CodeBuild handles container builds in the cloud)
@@ -29,20 +47,20 @@ chmod +x setup.sh deploy.sh deploy-frontend.sh
 
 ```bash
 source .venv/bin/activate
-python -c "from utils import retrieve_credentials_from_secrets_manager; print(retrieve_credentials_from_secrets_manager())"
+python3 -c "from utils import retrieve_credentials_from_secrets_manager; print(retrieve_credentials_from_secrets_manager())"
 ```
 
 ### Run locally
 
 ```bash
 source .venv/bin/activate
-python -m main
+python3 -m main
 ```
 
 ### Run with OpenTelemetry (production mode)
 
 ```bash
-opentelemetry-instrument python -m main
+opentelemetry-instrument python3 -m main
 ```
 
 ### Deploy to AgentCore
@@ -126,6 +144,70 @@ This builds the frontend as a static export, creates an Amplify app, and deploys
 
 ---
 
+## Infrastructure (CDK)
+
+The `infra/` directory contains AWS CDK (TypeScript) for production hardening:
+
+```bash
+cd infra
+npm install
+npx cdk deploy ProductionHardening-Staging
+```
+
+### Key CDK constructs:
+
+| Construct | Purpose |
+|-----------|---------|
+| `iam-construct.ts` | Least-privilege execution role (Converse API, Guardrails, ECR, Logs) |
+| `waf-construct.ts` | WAF WebACL with rate limiting, body size, managed rules |
+| `production-hardening-stack.ts` | Main stack: Cognito, ECR, CodeBuild, Amplify, Guardrail, S3 |
+
+### IAM Policy (post-deployment corrections)
+
+The IAM policy was updated during deployment to fix runtime issues:
+
+- Added `bedrock:Converse` and `bedrock:ConverseStream` (Strands SDK uses Converse API, not InvokeModel)
+- Added `bedrock:ApplyGuardrail`, `bedrock:ListGuardrails`, `bedrock:GetGuardrail`
+- Added ECR access for toolkit-created repo `bedrock-agentcore-personal_finance_agent`
+- Removed the `DenyBedrockOutsideRegion` statement (`aws:RequestedRegion` condition key is not populated for ConverseStream, causing false denies)
+
+### WAF Note
+
+The WAF WebACL is deployed and logging blocked requests, but is NOT associated with the Amplify app. Amplify Firewall integration is not available in eu-north-1. When support is added, update `amplifyAppArn` in `production-hardening-stack.ts`.
+
+---
+
+## Production-Hardening Changes
+
+Key code fixes applied during deployment to AgentCore:
+
+### Lazy initialization (AgentCore container compatibility)
+- `utils/guardrail.py` - boto3 clients initialized via `_get_bedrock_client()` / `_get_bedrock_runtime()` functions (not module-level) to avoid import-time AWS calls
+- `request_factory.py` - BedrockModel initialized via `_get_bedrock_model()` function (not module-level)
+
+### Authentication fix
+- `frontend/src/lib/auth.ts` - `getAccessToken()` returns `idToken` instead of `accessToken` (AgentCore JWT authorizer validates the `aud` claim, which only exists in Cognito ID tokens)
+
+### SSE streaming fix
+- `frontend/src/lib/agent.ts` - `finalize()` treats stream end without `[DONE]` marker as normal completion (AgentCore does not send `[DONE]`)
+
+### Guardrail discovery
+- `utils/guardrail.py` - `get_guardrail_id()` searches for multiple names: `finance-advisor-guardrail-staging`, `finance-advisor-guardrail-production`, `guardrail-no-bitcoin-advice`
+
+### Container security
+- `Dockerfile` - Added `apt-get update && apt-get upgrade` to patch system CVEs (perl, gnutls28, openssl)
+
+### Error handling
+- `main.py` - Staging error handler returns detailed error: `f"Error: {type(exc).__name__}: {str(exc)[:200]}"`
+
+### Script fixes
+- `deploy.sh` / `deploy-frontend.sh` - Changed `python` to `python3`, updated execution_role to use CDK-created role
+
+### Testing
+- `conftest.py` - Root-level conftest that mocks `bedrock_agentcore` for local pytest runs
+
+---
+
 ## Scripts
 
 | Script | Description |
@@ -151,16 +233,23 @@ Run these in order for a step-by-step walkthrough:
 ## Architecture
 
 ```
-User → Frontend (Next.js / Amplify)
-         ↓ Bearer token + SSE
+User -> Frontend (Next.js / Amplify)
+         | Bearer token (Cognito ID token) + SSE
+         v
        AgentCore Runtime (eu-north-1)
-         ↓
+         | JWT authorizer validates `aud` claim
+         v
        Orchestrator Agent (main.py)
-         ├── Budget Agent (budget_agent.py)
-         └── Financial Analysis Agent (financial_analysis_agent.py)
+         |-- Budget Agent (budget_agent.py)
+         |-- Financial Analysis Agent (financial_analysis_agent.py)
+         |
+       Bedrock Guardrail (blocks crypto/bitcoin advice)
+       AgentCore Memory (STM_ONLY - cross-session persistence)
 ```
 
-- **Model:** Amazon Nova Pro (`eu.amazon.nova-pro-v1:0`)
-- **Auth:** Cognito USER_PASSWORD_AUTH
-- **Guardrail:** Blocks Bitcoin/crypto investment advice
-- **Memory:** AgentCore Memory for conversation persistence
+- **Model:** Amazon Nova Pro (`eu.amazon.nova-pro-v1:0`) via Converse API
+- **Auth:** Cognito USER_PASSWORD_AUTH (ID token for AgentCore JWT validation)
+- **Guardrail:** Blocks Bitcoin/crypto investment advice (`finance-advisor-guardrail-staging`)
+- **Memory:** AgentCore Memory (STM_ONLY mode)
+- **Container:** ARM64/Graviton via CodeBuild, `ghcr.io/astral-sh/uv:python3.12-bookworm-slim` base
+- **WAF:** WebACL deployed (rate limit 100/5min, body 8KB, AWS managed rules) - not yet associated
