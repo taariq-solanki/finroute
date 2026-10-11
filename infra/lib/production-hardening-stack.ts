@@ -9,6 +9,7 @@ import { Construct } from "constructs";
 import { ProductionHardeningStackProps } from "./types";
 import { IamConstruct } from "./iam-construct";
 import { WafConstruct } from "./waf-construct";
+import { MemoryConstruct } from "./memory-construct";
 
 /**
  * Main stack for production hardening of the Multi-Agent Financial Advisor.
@@ -43,6 +44,18 @@ export class ProductionHardeningStack extends cdk.Stack {
     // Tag all resources with environment
     cdk.Tags.of(this).add("Environment", props.environment);
     cdk.Tags.of(this).add("Project", "multi-agent-financial-advisor");
+
+    // =========================================================================
+    // AgentCore Memory Construct - Long-term memory (FinancialAdvisorMemory)
+    //
+    // Instantiated before the IAM construct because FEAT-002's execution-role
+    // memory IAM statement is scoped to memory.memoryArn. The MemoryConstruct
+    // emits the `${environment}-agentcore-memory-id` CfnOutput itself, so no
+    // duplicate output/exportName is declared in this stack.
+    // =========================================================================
+    const memory = new MemoryConstruct(this, "MemoryConstruct", {
+      environment: props.environment,
+    });
 
     // =========================================================================
     // IAM Construct - Least-privilege execution role
