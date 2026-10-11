@@ -54,6 +54,33 @@ except Exception as e:
 echo ""
 
 # ----------------------------------------------------------------------------
+# Step 1b: Delete AgentCore Memory
+# ----------------------------------------------------------------------------
+echo "━━━ Step 1b: Deleting AgentCore Memory ━━━"
+
+# The agent's cross-session memory resource (created with name 'FinancialAdvisorMemory').
+# Match by exact name prefix so we only delete this project's memory, not others.
+REGION="$REGION" python3 -c "
+import os, boto3
+client = boto3.client('bedrock-agentcore-control', region_name=os.environ['REGION'])
+try:
+    deleted = False
+    for mem in client.list_memories().get('memories', []):
+        mem_id = mem.get('id') or mem.get('memoryId', '')
+        if mem_id.startswith('FinancialAdvisorMemory'):
+            print(f'  Deleting memory: {mem_id}')
+            client.delete_memory(memoryId=mem_id)
+            print('  ✓ Memory delete requested (completes asynchronously)')
+            deleted = True
+    if not deleted:
+        print('  No project memory found')
+except Exception as e:
+    print(f'  ⚠️  Could not delete memory: {e}')
+" 2>/dev/null || echo "  ⚠️  Memory cleanup skipped"
+
+echo ""
+
+# ----------------------------------------------------------------------------
 # Step 2: Delete Bedrock Guardrail
 # ----------------------------------------------------------------------------
 echo "━━━ Step 2: Deleting Bedrock Guardrail ━━━"
@@ -118,14 +145,23 @@ if [ -n "$CODEBUILD_ROLE" ]; then
         echo "  ✓ CodeBuild role '$CODEBUILD_ROLE' deleted" || true
 fi
 
-# Delete Amplify service role
-if aws iam get-role --role-name AmplifyServiceRole &>/dev/null 2>&1; then
-    for POLICY in $(aws iam list-attached-role-policies --role-name AmplifyServiceRole --query 'AttachedPolicies[].PolicyArn' --output text 2>/dev/null); do
-        aws iam detach-role-policy --role-name AmplifyServiceRole --policy-arn "$POLICY" 2>/dev/null || true
-    done
-    aws iam delete-role --role-name AmplifyServiceRole 2>/dev/null && \
-        echo "  ✓ Amplify service role deleted" || true
-fi
+# Delete Amplify service role(s) used by this project. Handles both the legacy
+# name (AmplifyServiceRole) and the CodeCommit access role created when the
+# Amplify app is connected to the CodeCommit repo (AmplifyCodeCommitAccessRole).
+for AMPLIFY_ROLE in AmplifyServiceRole AmplifyCodeCommitAccessRole; do
+    if aws iam get-role --role-name "$AMPLIFY_ROLE" &>/dev/null 2>&1; then
+        # Detach managed policies
+        for POLICY in $(aws iam list-attached-role-policies --role-name "$AMPLIFY_ROLE" --query 'AttachedPolicies[].PolicyArn' --output text 2>/dev/null); do
+            aws iam detach-role-policy --role-name "$AMPLIFY_ROLE" --policy-arn "$POLICY" 2>/dev/null || true
+        done
+        # Delete inline policies (e.g. CodeCommitReadFinanceAdvisor)
+        for POLICY_NAME in $(aws iam list-role-policies --role-name "$AMPLIFY_ROLE" --query 'PolicyNames[]' --output text 2>/dev/null); do
+            aws iam delete-role-policy --role-name "$AMPLIFY_ROLE" --policy-name "$POLICY_NAME" 2>/dev/null || true
+        done
+        aws iam delete-role --role-name "$AMPLIFY_ROLE" 2>/dev/null && \
+            echo "  ✓ Amplify role '$AMPLIFY_ROLE' deleted" || true
+    fi
+done
 
 echo ""
 
