@@ -1,4 +1,4 @@
-"""Shared test fixtures for the Multi-Agent Financial Advisor test suite.
+"""Shared test fixtures for the FinRoute test suite.
 
 Provides mocked versions of external dependencies:
 - Bedrock model (Strands BedrockModel)

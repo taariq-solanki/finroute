@@ -1,0 +1,9 @@
+# Strands Decider 2B routing layer (runs locally, on your own hardware).
+# Install into a Python 3.12 virtual environment:
+#   python3.12 -m venv .venv-decider
+#   .venv-decider/bin/pip install -r requirements-decider.txt
+#
+# Then start the decision model server (CPU example):
+#   OMP_NUM_THREADS=2 .venv-decider/bin/strands-decider serve \
+#     StrandsAgents/strands-decider-2B-qwen3.5-v1-2610 --device cpu --port 8010
+strands-decider>=0.1.0

@@ -1,6 +1,6 @@
 #!/bin/bash
 # ============================================================================
-# Financial Advisor — Deploy to AgentCore
+# FinRoute — Deploy to AgentCore
 # ============================================================================
 # Deploys the agent to AWS Bedrock AgentCore and updates the frontend config.
 #
@@ -19,7 +19,7 @@ PROJECT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REGION="eu-north-1"
 
 echo "============================================"
-echo "  Financial Advisor — Deploy to AgentCore"
+echo "  FinRoute — Deploy to AgentCore"
 echo "============================================"
 echo ""
 
@@ -64,10 +64,11 @@ echo "✓ Using AgentCore memory id: $MEMORY_ID"
 # rejected with 401 — the access token is the correct bearer.) Read these from
 # frontend/.env.local NOW —
 # Step 2 below rewrites that file, so we must capture the values before then.
-# Known-active fallbacks mirror the MEMORY_ID safety-net pattern so a missing/
-# regenerated .env.local can't silently blank the authorizer.
-DEFAULT_COGNITO_CLIENT_ID="5kqdn52topm5k5970mpbaqc10t"
-DEFAULT_COGNITO_POOL_ID="eu-north-1_jw1OxSF6u"
+# Fallbacks are intentionally blank — set your own Cognito client/pool id in
+# frontend/.env.local (written by setup.sh). The guard below refuses to deploy
+# an authorizer with no allowed clients.
+DEFAULT_COGNITO_CLIENT_ID=""
+DEFAULT_COGNITO_POOL_ID=""
 COGNITO_CLIENT_ID=$(grep NEXT_PUBLIC_COGNITO_CLIENT_ID "$PROJECT_DIR/frontend/.env.local" 2>/dev/null | cut -d= -f2 | head -n1)
 COGNITO_POOL_ID=$(grep NEXT_PUBLIC_COGNITO_USER_POOL_ID "$PROJECT_DIR/frontend/.env.local" 2>/dev/null | cut -d= -f2 | head -n1)
 COGNITO_CLIENT_ID=${COGNITO_CLIENT_ID:-$DEFAULT_COGNITO_CLIENT_ID}
@@ -113,7 +114,7 @@ runtime.configure(
     auto_create_ecr=True,
     requirements_file='requirements.txt',
     region=os.environ['REGION'],
-    agent_name='personal_finance_agent',
+    agent_name='finroute_agent',
     authorizer_configuration=auth_config,
 )
 result = runtime.launch(

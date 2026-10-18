@@ -40,7 +40,7 @@ export default function ChatInput({ onSend, disabled }: ChatInputProps) {
         value={input}
         onChange={(e) => setInput(e.target.value)}
         onKeyDown={handleKeyDown}
-        placeholder="Ask about budgets, investments, insurance planning..."
+        placeholder="Ask about budgets, investments, or stock analysis..."
         disabled={disabled}
         rows={1}
         aria-label="Message input"

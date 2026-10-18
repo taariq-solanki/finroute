@@ -23,8 +23,46 @@ from botocore.exceptions import ClientError
 
 from config import REQUIRED_REGION
 from utils import get_guardrail_id
+from decider_router import route_query, RouteDecision
 
 logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# Maps a Decider route choice to the exact tool name the orchestrator exposes,
+# plus a human-readable label for the routing hint. "both" intentionally has no
+# single tool - the orchestrator is told to use both specialists.
+# ---------------------------------------------------------------------------
+_ROUTE_TO_TOOL = {
+    "budget": "budget_agent",
+    "investment": "financial_analysis_agent_tool",
+    "both": None,
+}
+
+
+def _build_routing_hint(decision: RouteDecision) -> str:
+    """Turn a confident Decider decision into a system-prompt steering hint.
+
+    Only called when decision.should_act is True. The hint tells the orchestrator
+    which specialist the fast decision model already selected, so the LLM does not
+    re-derive routing - it goes straight to synthesis. When Decider is NOT
+    confident, no hint is added and the orchestrator routes on its own (fallback).
+    """
+    if decision.choice == "both":
+        target = (
+            "BOTH the budget_agent and the financial_analysis_agent_tool "
+            "(this request needs budgeting and investment input)"
+        )
+    else:
+        tool = _ROUTE_TO_TOOL.get(decision.choice)
+        target = f"the {tool}" if tool else "the most appropriate specialist"
+
+    return (
+        "\n\n[ROUTING] A fast decision model (Strands Decider 2B) classified this "
+        f"request and selected {target} with confidence "
+        f"{decision.confidence:.2f}. Call that specialist directly to answer; do "
+        "not spend reasoning on which agent to pick. Still synthesize a clear, "
+        "cohesive final answer with appropriate disclaimers."
+    )
 
 # ---------------------------------------------------------------------------
 # Generic refusal message for guardrail PROMPT_ATTACK interventions.
@@ -40,7 +78,7 @@ GUARDRAIL_REFUSAL_MESSAGE: str = (
 # This value is NEVER modified after module initialization.
 # ---------------------------------------------------------------------------
 ORCHESTRATOR_PROMPT: str = (
-    "You are a comprehensive financial advisor orchestrator that coordinates "
+    "You are FinRoute, a comprehensive financial advisor orchestrator that coordinates "
     "between specialized financial agents to provide complete financial guidance. \n\n"
     "Your specialized agents are:\n"
     "1. **budget_agent**: Handles budgeting, spending analysis, savings "
@@ -279,11 +317,34 @@ async def create_request_context(
     if memory_id:
         memory_context = await _query_memory(memory_id, user_message, actor_id)
 
+    # Step 1b: Tool-selection decision via Strands Decider 2B (#tool-selection).
+    # Decider is a fast, calibrated decision model. When it is confident, we add a
+    # routing hint so the orchestrator skips LLM routing and goes straight to the
+    # chosen specialist. When it is NOT confident (or unreachable), we add nothing
+    # and the LLM orchestrator routes on its own. This keeps Decider strictly
+    # additive and safe - routing never breaks if the decision model is down.
+    routing_hint: str = ""
+    try:
+        decision = await asyncio.to_thread(route_query, user_message)
+        if decision.should_act and decision.choice:
+            routing_hint = _build_routing_hint(decision)
+            logger.info(
+                "Decider ACT: route=%s confidence=%.3f latency_ms=%.0f (actor_id=%s)",
+                decision.choice, decision.confidence, decision.latency_ms, actor_id,
+            )
+        else:
+            logger.info(
+                "Decider ESCALATE: deferring routing to LLM (choice=%s confidence=%.3f "
+                "source=%s actor_id=%s)",
+                decision.choice, decision.confidence, decision.source, actor_id,
+            )
+    except Exception as exc:  # defensive: Decider must never break the request
+        logger.warning("Routing decision skipped (%s); using LLM routing.", exc)
+
     # Step 2: Build enhanced prompt in a LOCAL variable - never mutate module state
+    enhanced_prompt: str = ORCHESTRATOR_PROMPT + routing_hint
     if memory_context:
-        enhanced_prompt: str = ORCHESTRATOR_PROMPT + memory_context
-    else:
-        enhanced_prompt = ORCHESTRATOR_PROMPT
+        enhanced_prompt = enhanced_prompt + memory_context
 
     # Step 3: Create a per-request agent with isolated conversation history
     request_agent = _create_per_request_agent(enhanced_prompt)

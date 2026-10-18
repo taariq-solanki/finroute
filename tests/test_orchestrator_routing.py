@@ -111,6 +111,11 @@ def mock_request_factory(tool_tracker):
     - config.REQUIRED_REGION -> 'eu-north-1'
     - utils.get_guardrail_id -> fake ID
     """
+    # By default, make Decider "escalate" (should_act=False) so these existing
+    # routing tests exercise the LLM-routing path and never touch the network.
+    # The dedicated Decider test below overrides this to assert the ACT path.
+    from decider_router import RouteDecision
+
     with patch(
         "request_factory.Agent", side_effect=lambda **kwargs: _make_mock_agent(tool_tracker)
     ) as mock_agent_cls, patch(
@@ -119,6 +124,9 @@ def mock_request_factory(tool_tracker):
         "request_factory._bedrock_model"
     ) as mock_model, patch(
         "request_factory.get_guardrail_id", return_value="fake-guardrail-id"
+    ), patch(
+        "request_factory.route_query",
+        return_value=RouteDecision(choice=None, should_act=False, source="fallback"),
     ):
         # Memory client returns empty results
         mock_memory_instance = MagicMock()
@@ -488,3 +496,113 @@ class TestConcurrentRequestIsolation:
             f"Expected {num_requests} unique responses, got {len(unique_responses)}. "
             "This indicates potential response cross-contamination."
         )
+
+
+# ---------------------------------------------------------------------------
+# Integration Tests: Strands Decider 2B tool-selection
+# ---------------------------------------------------------------------------
+
+
+def _make_prompt_capturing_agent(captured: dict):
+    """Mock Agent that records the system_prompt it was constructed with.
+
+    Lets us assert whether the Decider routing hint was injected into the
+    orchestrator's prompt for a given request.
+    """
+
+    def _factory(**kwargs):
+        captured["system_prompt"] = kwargs.get("system_prompt", "")
+
+        async def mock_stream_async(message: str):
+            yield {"data": "ok"}
+
+        agent = MagicMock()
+        agent.stream_async = mock_stream_async
+        return agent
+
+    return _factory
+
+
+@pytest.mark.integration
+class TestDeciderRouting:
+    """Verify Strands Decider 2B steers routing when confident, and defers when not."""
+
+    async def _run(self, decision, query="Analyze AAPL stock"):
+        """Drive create_request_context with a patched Decider decision and
+        return the system_prompt the orchestrator agent was built with."""
+        from decider_router import RouteDecision
+        import request_factory
+
+        captured: dict = {}
+        with patch(
+            "request_factory.Agent", side_effect=_make_prompt_capturing_agent(captured)
+        ), patch(
+            "request_factory._bedrock_model"
+        ), patch(
+            "request_factory.get_guardrail_id", return_value="fake-guardrail-id"
+        ), patch(
+            "request_factory.route_query", return_value=decision
+        ):
+            async for _ in request_factory.create_request_context(
+                user_message=query,
+                actor_id="decider-test",
+                session_id="s-decider",
+                memory_id=None,
+            ):
+                pass
+        return captured["system_prompt"]
+
+    async def test_confident_decision_injects_routing_hint(self):
+        """When Decider is confident (should_act=True), the orchestrator prompt
+        must carry a [ROUTING] hint naming the chosen specialist."""
+        from decider_router import RouteDecision
+
+        decision = RouteDecision(
+            choice="investment",
+            confidence=0.97,
+            probabilities={"investment": 0.97, "budget": 0.01, "both": 0.02},
+            should_act=True,
+            latency_ms=2100.0,
+            source="decider",
+        )
+        prompt = await self._run(decision)
+        assert "[ROUTING]" in prompt
+        assert "financial_analysis_agent_tool" in prompt
+        assert "0.97" in prompt
+
+    async def test_both_decision_hints_both_agents(self):
+        """A confident 'both' decision should instruct using both specialists."""
+        from decider_router import RouteDecision
+
+        decision = RouteDecision(
+            choice="both",
+            confidence=0.85,
+            should_act=True,
+            source="decider",
+        )
+        prompt = await self._run(decision, query="Budget my salary and invest it")
+        assert "[ROUTING]" in prompt
+        assert "budget_agent" in prompt
+        assert "financial_analysis_agent_tool" in prompt
+
+    async def test_low_confidence_adds_no_hint(self):
+        """When Decider is NOT confident (should_act=False), no routing hint is
+        added and the LLM orchestrator routes on its own (fallback path)."""
+        from decider_router import RouteDecision
+
+        decision = RouteDecision(
+            choice="both",
+            confidence=0.44,
+            should_act=False,
+            source="decider",
+        )
+        prompt = await self._run(decision)
+        assert "[ROUTING]" not in prompt
+
+    async def test_decider_unavailable_adds_no_hint(self):
+        """If Decider is unreachable (fallback), routing degrades to LLM only."""
+        from decider_router import RouteDecision
+
+        decision = RouteDecision(choice=None, should_act=False, source="fallback")
+        prompt = await self._run(decision)
+        assert "[ROUTING]" not in prompt

@@ -1,7 +1,7 @@
 [project]
-name = "multi-agent-financial-advisor"
+name = "finroute"
 version = "1.0.0"
-description = "Multi-Agent Financial Advisor - Production Backend"
+description = "FinRoute - Multi-Agent AI Financial Advisor Backend"
 requires-python = ">=3.12"
 
 [tool.pytest.ini_options]

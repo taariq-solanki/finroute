@@ -1,9 +1,9 @@
 #!/bin/bash
 # ============================================================================
-# Financial Advisor — Full Project Setup Script
+# FinRoute — Full Project Setup Script
 # ============================================================================
-# This script automates the complete setup of the multi-agent financial
-# assistant including backend Python env, frontend, IAM roles, and deployment.
+# This script automates the complete setup of the FinRoute multi-agent
+# financial assistant including backend Python env, frontend, IAM roles, and deployment.
 #
 # Prerequisites:
 #   - Python 3.12 installed (brew install python@3.12)
@@ -20,10 +20,10 @@ set -e
 
 PROJECT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REGION="eu-north-1"
-RUNTIME_NAME="personal_finance_agent"
+RUNTIME_NAME="finroute_agent"
 
 echo "============================================"
-echo "  Financial Advisor — Automated Setup"
+echo "  FinRoute — Automated Setup"
 echo "============================================"
 echo ""
 echo "Project directory: $PROJECT_DIR"

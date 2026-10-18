@@ -12,7 +12,7 @@ export interface IamConstructProps {
   region: string;
   /** AWS account ID for resource ARN construction */
   accountId: string;
-  /** AgentCore Runtime name (e.g., personal_finance_agent) */
+  /** AgentCore Runtime name (e.g., finroute_agent) */
   runtimeName: string;
   /** ECR repository name for agent container images */
   ecrRepositoryName: string;

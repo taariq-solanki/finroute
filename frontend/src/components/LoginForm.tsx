@@ -24,10 +24,10 @@ export default function LoginForm({ onLogin, error }: LoginFormProps) {
     <div className="login-container">
       <div className="login-card">
         <div className="login-header">
-          <div className="login-logo">NI</div>
-          <h1>Financial Advisor</h1>
+          <div className="login-logo">FR</div>
+          <h1>FinRoute</h1>
           <p className="subtitle">
-            AI-powered insurance & financial planning assistant
+            AI-powered financial planning assistant
           </p>
         </div>
 
@@ -62,11 +62,7 @@ export default function LoginForm({ onLogin, error }: LoginFormProps) {
         </form>
 
         <div className="login-footer">
-          Powered by{" "}
-          <a href="https://www.nextinsurance.com/" target="_blank" rel="noopener noreferrer">
-            NEXT Insurance
-          </a>
-          {" "}&bull;{" "}Built by CloudAge
+          FinRoute &bull; Multi-agent AI financial advisor
         </div>
       </div>
     </div>

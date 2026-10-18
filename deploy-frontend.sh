@@ -1,6 +1,6 @@
 #!/bin/bash
 # ============================================================================
-# Financial Advisor — Deploy Frontend to AWS Amplify
+# FinRoute — Deploy Frontend to AWS Amplify
 # ============================================================================
 # Builds the Next.js frontend as a static export and deploys to AWS Amplify
 # using manual deployment (no CodeCommit dependency).
@@ -19,7 +19,7 @@ set -e
 
 PROJECT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REGION="eu-north-1"
-APP_NAME="finance-advisor-ui"
+APP_NAME="finroute-ui"
 
 echo "============================================"
 echo "  Frontend Deployment to AWS Amplify"

@@ -1,25 +1,59 @@
-# Financial Advisor - Multi-Agent AI Platform
+# FinRoute - Multi-Agent AI Financial Advisor
 
 AI-powered financial assistant built on AWS Bedrock AgentCore with a Next.js frontend.
-NEXT Insurance branding - Powered by CloudAge.
+A multi-agent system where an orchestrator routes between a budget agent and an
+investment analysis agent, backed by Bedrock Nova Pro, Cognito auth, memory, and guardrails.
 
 ---
 
-## Current Deployment (Staging)
+## Strands Decider 2B — the routing decision
 
-| Resource | Value |
-|----------|-------|
-| AgentCore Runtime | `personal_finance_agent-mc5EysEAKi` |
-| Memory | `personal_finance_agent_mem-35VQoI2mZl` (STM_ONLY) |
-| Cognito Pool | `eu-north-1_3CoCO4SDy` |
-| Cognito Client | `33rn8bdj5b8g7rusoqe2s7agfn` |
-| Amplify App | `d3jywevc7tu25i` |
-| Frontend URL | https://main.d3jywevc7tu25i.amplifyapp.com |
-| CDK Stack | `ProductionHardening-Staging` |
-| IAM Role | `agentcore-execution-personal_finance_agent-staging` |
-| Guardrail | `g8sr2bf9cymw` (`finance-advisor-guardrail-staging`) |
-| Region | `eu-north-1` |
-| WAF WebACL | Deployed but NOT associated (eu-north-1 lacks Amplify Firewall) |
+> Hackathon pattern: **`#tool-selection`** · tags: `#strands-decider-2b` `#tool-selection`
+
+FinRoute hands one meaningful decision to **[Strands Decider 2B](https://github.com/strands-labs/strands-decider)**,
+a small, fast, calibrated decision model: **"which specialist agent should handle this request —
+budget, investment, or both?"**
+
+A general LLM can route too, but it cannot give an honest, *calibrated* confidence for its
+choice. Decider can. FinRoute uses that confidence to apply an explicit policy:
+
+| Decider confidence | Action |
+|--------------------|--------|
+| `>= 0.75` (ACT)      | Route **directly** to the chosen specialist — no LLM round-trip spent on routing |
+| `<  0.75` (ESCALATE) | Defer to the full LLM orchestrator to decide (the genuinely ambiguous cases) |
+
+So the fast, cheap decision model handles the clear cases and the LLM is reserved for the hard
+ones. If the Decider server is unreachable, routing safely falls back to the LLM — the decision
+model is strictly additive and never a single point of failure.
+
+### Files
+- **`decider_router.py`** — the reusable decision pattern. A generic `decide(state, options,
+  instructions)` any Strands agent can drop in, plus `route_query()` for FinRoute. Returns a
+  `RouteDecision` with the choice, full probability distribution, calibrated confidence, and a
+  `should_act` flag. Standard-library only; fails safe.
+- **`request_factory.py`** — wires the decision into the orchestrator: a confident decision
+  injects a `[ROUTING]` hint into the system prompt so the agent skips LLM routing.
+- **`demo_routing.py`** — a local, zero-cost demo that prints the routing decision, the
+  probability bars, the confidence, and ACT vs ESCALATE for a set of sample queries.
+
+### Run the routing demo (local, no AWS needed)
+
+```bash
+# 1. Install the decision model into a Python 3.12 venv
+python3.12 -m venv .venv-decider
+.venv-decider/bin/pip install -r requirements-decider.txt
+
+# 2. Start the Decider server (CPU; first run downloads ~1.9 GB)
+OMP_NUM_THREADS=2 .venv-decider/bin/strands-decider serve \
+  StrandsAgents/strands-decider-2B-qwen3.5-v1-2610 --device cpu --port 8010
+
+# 3. In another terminal, run the demo
+.venv-decider/bin/python demo_routing.py
+# ...or route your own query:
+.venv-decider/bin/python demo_routing.py "Analyze Tesla and budget my $4000 salary"
+```
+
+Point `DECIDER_ENDPOINT` at a different host/port, or tune `DECIDER_ACT_THRESHOLD`, via env vars.
 
 ---
 
@@ -50,11 +84,11 @@ source .venv/bin/activate && python -m pytest
 
 # 5. Create the CodeCommit repo (once) and push
 pipx install git-remote-codecommit        # one-time: CodeCommit git helper
-aws codecommit create-repository --repository-name finance-advisor-frontend --region eu-north-1
+aws codecommit create-repository --repository-name finroute-frontend --region eu-north-1
 git push origin main
 
 # 6. In the Amplify console: New app -> Host web app -> AWS CodeCommit ->
-#    pick finance-advisor-frontend + main branch (auto-detects amplify.yml,
+#    pick finroute-frontend + main branch (auto-detects amplify.yml,
 #    which pins Node 18 for the build).
 
 # 7. Set NEXT_PUBLIC_* env vars in Amplify (AgentCore endpoint from step 3,
@@ -211,7 +245,7 @@ The IAM policy was updated during deployment to fix runtime issues:
 
 - Added `bedrock:Converse` and `bedrock:ConverseStream` (Strands SDK uses Converse API, not InvokeModel)
 - Added `bedrock:ApplyGuardrail`, `bedrock:ListGuardrails`, `bedrock:GetGuardrail`
-- Added ECR access for toolkit-created repo `bedrock-agentcore-personal_finance_agent`
+- Added ECR access for toolkit-created repo `bedrock-agentcore-finroute_agent`
 - Removed the `DenyBedrockOutsideRegion` statement (`aws:RequestedRegion` condition key is not populated for ConverseStream, causing false denies)
 
 ### WAF Note
@@ -246,10 +280,16 @@ Key code fixes applied during deployment to AgentCore:
 
 ### Script fixes
 - `deploy.sh` / `deploy-frontend.sh` / `setup.sh` / `cleanup.sh` - Standardized inline Python invocations to `python3` and hardened shell→Python heredocs (values passed via the environment instead of string interpolation)
-- `deploy.sh` - On a fresh account, `execution_role` uses the setup-created role `AmazonBedrockAgentCoreSDKRuntime-<region>`. (The live staging environment above was provisioned via CDK and therefore shows the CDK-created role `agentcore-execution-personal_finance_agent-staging`.)
+- `deploy.sh` - On a fresh account, `execution_role` uses the setup-created role `AmazonBedrockAgentCoreSDKRuntime-<region>`. (The live staging environment above was provisioned via CDK and therefore shows the CDK-created role `agentcore-execution-finroute_agent-staging`.)
 
 ### Testing
 - `conftest.py` - Root-level conftest that mocks `bedrock_agentcore` for local pytest runs
+
+### FinRoute (hackathon) note
+- This project is an original build named **FinRoute**. The orchestrator's tool-selection
+  decision is designed to be handed to **Strands Decider 2B** (a fast, calibrated decision model)
+  so routing happens without a full LLM call, falling back to the LLM only when Decider's
+  confidence is low.
 
 ---
 

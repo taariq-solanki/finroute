@@ -1,6 +1,6 @@
 #!/bin/bash
 # ============================================================================
-# Financial Advisor — Cleanup All AWS Resources
+# FinRoute — Cleanup All AWS Resources
 # ============================================================================
 # Removes all AWS resources created by this project.
 #
@@ -15,7 +15,7 @@ PROJECT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REGION="eu-north-1"
 
 echo "============================================"
-echo "  Financial Advisor — Resource Cleanup"
+echo "  FinRoute — Resource Cleanup"
 echo "============================================"
 echo ""
 echo "⚠️  This will DELETE all AWS resources created by this project."
@@ -43,7 +43,7 @@ client = boto3.client('bedrock-agentcore-control', region_name=os.environ['REGIO
 try:
     runtimes = client.list_agent_runtimes()
     for rt in runtimes.get('agentRuntimes', []):
-        if 'personal_finance_agent' in rt['agentRuntimeName']:
+        if 'finroute_agent' in rt['agentRuntimeName']:
             print(f'  Deleting runtime: {rt[\"agentRuntimeId\"]}')
             client.delete_agent_runtime(agentRuntimeId=rt['agentRuntimeId'])
             print(f'  ✓ Runtime deleted')
@@ -185,8 +185,8 @@ echo ""
 echo "━━━ Step 6: Cleaning up ECR ━━━"
 
 # Match the project's own repo prefix (toolkit names it
-# bedrock-agentcore-personal_finance_agent*), not every bedrock-agentcore repo.
-for REPO in $(aws ecr describe-repositories --region "$REGION" --query 'repositories[?contains(repositoryName, `bedrock-agentcore-personal_finance_agent`)].repositoryName' --output text 2>/dev/null); do
+# bedrock-agentcore-finroute_agent*), not every bedrock-agentcore repo.
+for REPO in $(aws ecr describe-repositories --region "$REGION" --query 'repositories[?contains(repositoryName, `bedrock-agentcore-finroute_agent`)].repositoryName' --output text 2>/dev/null); do
     echo "  Deleting ECR repo: $REPO"
     aws ecr delete-repository --repository-name "$REPO" --force --region "$REGION" 2>/dev/null && \
         echo "  ✓ Deleted" || echo "  ⚠️  Could not delete"
@@ -200,7 +200,7 @@ echo ""
 echo "━━━ Step 7: Cleaning up CodeBuild ━━━"
 
 # Match the project's own CodeBuild project prefix only, not every bedrock-agentcore project.
-for PROJECT in $(aws codebuild list-projects --region "$REGION" --query 'projects' --output text 2>/dev/null | tr '\t' '\n' | grep "bedrock-agentcore-personal_finance_agent"); do
+for PROJECT in $(aws codebuild list-projects --region "$REGION" --query 'projects' --output text 2>/dev/null | tr '\t' '\n' | grep "bedrock-agentcore-finroute_agent"); do
     echo "  Deleting project: $PROJECT"
     aws codebuild delete-project --name "$PROJECT" --region "$REGION" 2>/dev/null && \
         echo "  ✓ Deleted" || echo "  ⚠️  Could not delete"
@@ -213,9 +213,9 @@ echo ""
 # ----------------------------------------------------------------------------
 echo "━━━ Step 8: Cleaning up Amplify ━━━"
 
-# Match the exact app name created by deploy-frontend.sh (APP_NAME="finance-advisor-ui"),
-# not any app whose name merely contains "finance-advisor".
-for APP_ID in $(aws amplify list-apps --region "$REGION" --query "apps[?name=='finance-advisor-ui'].appId" --output text 2>/dev/null); do
+# Match the exact app name created by deploy-frontend.sh (APP_NAME="finroute-ui"),
+# not any app whose name merely contains "finroute".
+for APP_ID in $(aws amplify list-apps --region "$REGION" --query "apps[?name=='finroute-ui'].appId" --output text 2>/dev/null); do
     echo "  Deleting Amplify app: $APP_ID"
     aws amplify delete-app --app-id "$APP_ID" --region "$REGION" 2>/dev/null && \
         echo "  ✓ Deleted" || echo "  ⚠️  Could not delete"
@@ -228,7 +228,7 @@ echo ""
 # ----------------------------------------------------------------------------
 echo "━━━ Step 9: Cleaning up CodeCommit ━━━"
 
-aws codecommit delete-repository --repository-name "finance-advisor-frontend" --region "$REGION" 2>/dev/null && \
+aws codecommit delete-repository --repository-name "finroute-frontend" --region "$REGION" 2>/dev/null && \
     echo "  ✓ CodeCommit repo deleted" || echo "  ⚠️  No CodeCommit repo found"
 
 echo ""

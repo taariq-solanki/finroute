@@ -1,4 +1,5 @@
 .venv/
+.venv-decider/
 __pycache__/
 *.pyc
 .ipynb_checkpoints/
@@ -16,5 +17,10 @@ frontend/.env.local
 
 # Agent workflow reports (local only)
 .agents/
+**/.agents/
 frontend/.agents-plan/
 frontend/tsconfig.tsbuildinfo
+
+# Hugging Face / model cache (large; downloaded on demand)
+.cache/
+*.safetensors

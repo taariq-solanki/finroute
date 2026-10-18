@@ -5,7 +5,7 @@
 # policies. It is NOT consumed by the current CDK + deploy.sh deployment path
 # (no deploy/setup/cleanup script, CDK stack, or application module references
 # it). The authoritative IAM source for the live AgentCore execution role
-# (agentcore-execution-personal_finance_agent-staging) is the least-privilege
+# (agentcore-execution-finroute_agent-staging) is the least-privilege
 # CDK construct infra/lib/iam-construct.ts. Retained for reference only.
 # ============================================================================
 AWSTemplateFormatVersion: "2010-09-09"

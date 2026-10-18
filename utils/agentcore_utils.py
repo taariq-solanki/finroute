@@ -65,7 +65,7 @@ def setup_cognito_user_pool():
         client_id = app_client_response["UserPoolClient"]["ClientId"]
         
         # Generate secure credentials
-        username = f"cloudageuser-{secrets.token_hex(4)}"
+        username = f"finrouteuser-{secrets.token_hex(4)}"
         temp_password = generate_secure_password()
         permanent_password = generate_secure_password()
         

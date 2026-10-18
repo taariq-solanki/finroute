@@ -15,10 +15,10 @@ export interface ProductionHardeningStackProps extends cdk.StackProps {
   /** AWS account ID for resource ARN construction */
   accountId: string;
 
-  /** AgentCore Runtime name (e.g., personal_finance_agent) */
+  /** AgentCore Runtime name (e.g., finroute_agent) */
   runtimeName: string;
 
-  /** Amplify application name (e.g., finance-advisor-ui) */
+  /** Amplify application name (e.g., finroute-ui) */
   amplifyAppName: string;
 
   /** ECR repository name for agent container images */

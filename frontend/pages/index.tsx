@@ -26,7 +26,7 @@ const SUGGESTIONS = [
   "Build a conservative portfolio for $25K",
   "Compare NVDA, TSLA, and META over 6 months",
   "What's the 50/30/20 rule for budgeting?",
-  "How should I allocate savings for insurance premiums?",
+  "Build me a moderate-risk portfolio for $10,000",
 ];
 
 export default function Home() {
@@ -220,7 +220,7 @@ export default function Home() {
     return (
       <>
         <Head>
-          <title>Sign In — NEXT Insurance Financial Advisor</title>
+          <title>Sign In — FinRoute</title>
         </Head>
         {sessionExpired && (
           <div className="session-expired-banner" role="alert">
@@ -235,16 +235,16 @@ export default function Home() {
   return (
     <>
       <Head>
-        <title>Financial Advisor — NEXT Insurance</title>
+        <title>FinRoute — AI Financial Advisor</title>
       </Head>
       <div className="app-container">
         {/* Header */}
         <header className="header">
           <div className="header-brand">
-            <div className="header-logo">NI</div>
+            <div className="header-logo">FR</div>
             <div>
-              <h1>Financial Advisor</h1>
-              <p>Budget planning &bull; Investment analysis &bull; Insurance guidance</p>
+              <h1>FinRoute</h1>
+              <p>Budget planning &bull; Investment analysis &bull; Smart routing</p>
             </div>
           </div>
           <button onClick={handleLogout} className="signout-btn">
@@ -260,7 +260,7 @@ export default function Home() {
               <h2>How can I help with your finances today?</h2>
               <p>
                 Get personalized budget advice, investment portfolio
-                recommendations, stock analysis, and insurance planning guidance.
+                recommendations, and real-time stock analysis.
               </p>
               <div className="suggestions">
                 {SUGGESTIONS.map((suggestion) => (
@@ -305,15 +305,8 @@ export default function Home() {
 
         {/* Footer Branding */}
         <div className="footer-brand">
-          <a
-            href="https://www.nextinsurance.com/"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            NEXT Insurance
-          </a>
-          {" "}&bull; AI-Powered Financial Intelligence
-          <div className="powered-by">Powered by CloudAge</div>
+          FinRoute &bull; AI-Powered Financial Intelligence
+          <div className="powered-by">Multi-agent routing with Strands Decider 2B</div>
         </div>
       </div>
     </>
