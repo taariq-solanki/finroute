@@ -1,0 +1,29 @@
+.venv/
+.venv-decider/
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+.DS_Store
+*.zip
+.vscode/
+.kiro/
+.bedrock_agentcore.yaml
+
+# Frontend
+frontend/node_modules/
+frontend/.next/
+frontend/out/
+frontend/.env.local
+
+# Agent workflow reports (local only)
+.agents/
+**/.agents/
+frontend/.agents-plan/
+frontend/tsconfig.tsbuildinfo
+
+# Hugging Face / model cache (large; downloaded on demand)
+.cache/
+*.safetensors
+
+# Redeploy state (local only)
+.finroute-deploy-state

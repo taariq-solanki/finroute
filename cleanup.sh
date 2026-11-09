@@ -1,0 +1,266 @@
+#!/bin/bash
+# ============================================================================
+# FinRoute — Cleanup All AWS Resources
+# ============================================================================
+# Removes all AWS resources created by this project.
+#
+# Usage:
+#   chmod +x cleanup.sh
+#   ./cleanup.sh
+# ============================================================================
+
+set -e
+
+PROJECT_DIR="$(cd "$(dirname "$0")" && pwd)"
+REGION="us-east-1"
+
+echo "============================================"
+echo "  FinRoute — Resource Cleanup"
+echo "============================================"
+echo ""
+echo "⚠️  This will DELETE all AWS resources created by this project."
+echo "  Region: $REGION"
+echo ""
+read -p "Are you sure? (yes/no): " CONFIRM
+if [ "$CONFIRM" != "yes" ]; then
+    echo "Cancelled."
+    exit 0
+fi
+
+cd "$PROJECT_DIR"
+source .venv/bin/activate 2>/dev/null || true
+
+echo ""
+
+# ----------------------------------------------------------------------------
+# Step 1: Delete AgentCore Runtime
+# ----------------------------------------------------------------------------
+echo "━━━ Step 1: Deleting AgentCore Runtime ━━━"
+
+REGION="$REGION" python3 -c "
+import os, boto3
+client = boto3.client('bedrock-agentcore-control', region_name=os.environ['REGION'])
+try:
+    runtimes = client.list_agent_runtimes()
+    for rt in runtimes.get('agentRuntimes', []):
+        if 'finroute_agent' in rt['agentRuntimeName']:
+            print(f'  Deleting runtime: {rt[\"agentRuntimeId\"]}')
+            client.delete_agent_runtime(agentRuntimeId=rt['agentRuntimeId'])
+            print(f'  ✓ Runtime deleted')
+except Exception as e:
+    print(f'  ⚠️  Could not delete runtime: {e}')
+" 2>/dev/null || echo "  ⚠️  Runtime cleanup skipped"
+
+echo ""
+
+# ----------------------------------------------------------------------------
+# Step 1b: Delete AgentCore Memory
+# ----------------------------------------------------------------------------
+echo "━━━ Step 1b: Deleting AgentCore Memory ━━━"
+
+# The agent's cross-session memory resource (created with name 'FinancialAdvisorMemory').
+# Match by exact name prefix so we only delete this project's memory, not others.
+REGION="$REGION" python3 -c "
+import os, boto3
+client = boto3.client('bedrock-agentcore-control', region_name=os.environ['REGION'])
+try:
+    deleted = False
+    for mem in client.list_memories().get('memories', []):
+        mem_id = mem.get('id') or mem.get('memoryId', '')
+        if mem_id.startswith('FinancialAdvisorMemory'):
+            print(f'  Deleting memory: {mem_id}')
+            client.delete_memory(memoryId=mem_id)
+            print('  ✓ Memory delete requested (completes asynchronously)')
+            deleted = True
+    if not deleted:
+        print('  No project memory found')
+except Exception as e:
+    print(f'  ⚠️  Could not delete memory: {e}')
+" 2>/dev/null || echo "  ⚠️  Memory cleanup skipped"
+
+echo ""
+
+# ----------------------------------------------------------------------------
+# Step 2: Delete Bedrock Guardrail
+# ----------------------------------------------------------------------------
+echo "━━━ Step 2: Deleting Bedrock Guardrail ━━━"
+
+python3 -c "
+from utils.guardrail import delete_guardrail
+delete_guardrail()
+" 2>/dev/null || echo "  ⚠️  Guardrail cleanup skipped"
+
+echo ""
+
+# ----------------------------------------------------------------------------
+# Step 3: Delete Cognito User Pool
+# ----------------------------------------------------------------------------
+echo "━━━ Step 3: Deleting Cognito User Pool ━━━"
+
+# Delete ONLY the project's exact pool ("agentpool"). A substring sweep over all
+# pools (matching 'finance'/'agentcore') was removed: on a shared account it could
+# delete unrelated projects' pools. delete_cognito_user_pool() finds 'agentpool' by
+# exact name.
+python3 -c "
+from utils.agentcore_utils import delete_cognito_user_pool
+delete_cognito_user_pool()
+" 2>/dev/null || echo "  ⚠️  Cognito cleanup skipped"
+
+echo ""
+
+# ----------------------------------------------------------------------------
+# Step 4: Delete IAM Role
+# ----------------------------------------------------------------------------
+echo "━━━ Step 4: Cleaning up IAM role ━━━"
+
+ROLE_NAME="AmazonBedrockAgentCoreSDKRuntime-$REGION"
+
+# Detach policies first
+for POLICY in "arn:aws:iam::aws:policy/AmazonBedrockFullAccess" \
+              "arn:aws:iam::aws:policy/CloudWatchLogsFullAccess" \
+              "arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly"; do
+    aws iam detach-role-policy --role-name "$ROLE_NAME" --policy-arn "$POLICY" 2>/dev/null || true
+done
+
+# Delete inline policies
+for POLICY_NAME in $(aws iam list-role-policies --role-name "$ROLE_NAME" --query 'PolicyNames[]' --output text 2>/dev/null || echo ""); do
+    aws iam delete-role-policy --role-name "$ROLE_NAME" --policy-name "$POLICY_NAME" 2>/dev/null || true
+done
+
+# Delete the role
+aws iam delete-role --role-name "$ROLE_NAME" 2>/dev/null && \
+    echo "  ✓ IAM role '$ROLE_NAME' deleted" || \
+    echo "  ⚠️  Could not delete IAM role"
+
+# Delete CodeBuild role
+CODEBUILD_ROLE=$(aws iam list-roles --query "Roles[?contains(RoleName, 'AgentCoreSDKCodeBuild')].RoleName" --output text 2>/dev/null || echo "")
+if [ -n "$CODEBUILD_ROLE" ]; then
+    for POLICY in $(aws iam list-attached-role-policies --role-name "$CODEBUILD_ROLE" --query 'AttachedPolicies[].PolicyArn' --output text 2>/dev/null); do
+        aws iam detach-role-policy --role-name "$CODEBUILD_ROLE" --policy-arn "$POLICY" 2>/dev/null || true
+    done
+    for POLICY_NAME in $(aws iam list-role-policies --role-name "$CODEBUILD_ROLE" --query 'PolicyNames[]' --output text 2>/dev/null); do
+        aws iam delete-role-policy --role-name "$CODEBUILD_ROLE" --policy-name "$POLICY_NAME" 2>/dev/null || true
+    done
+    aws iam delete-role --role-name "$CODEBUILD_ROLE" 2>/dev/null && \
+        echo "  ✓ CodeBuild role '$CODEBUILD_ROLE' deleted" || true
+fi
+
+# Delete Amplify service role(s) used by this project. Handles both the legacy
+# name (AmplifyServiceRole) and the CodeCommit access role created when the
+# Amplify app is connected to the CodeCommit repo (AmplifyCodeCommitAccessRole).
+for AMPLIFY_ROLE in AmplifyServiceRole AmplifyCodeCommitAccessRole; do
+    if aws iam get-role --role-name "$AMPLIFY_ROLE" &>/dev/null 2>&1; then
+        # Detach managed policies
+        for POLICY in $(aws iam list-attached-role-policies --role-name "$AMPLIFY_ROLE" --query 'AttachedPolicies[].PolicyArn' --output text 2>/dev/null); do
+            aws iam detach-role-policy --role-name "$AMPLIFY_ROLE" --policy-arn "$POLICY" 2>/dev/null || true
+        done
+        # Delete inline policies (e.g. CodeCommitReadFinanceAdvisor)
+        for POLICY_NAME in $(aws iam list-role-policies --role-name "$AMPLIFY_ROLE" --query 'PolicyNames[]' --output text 2>/dev/null); do
+            aws iam delete-role-policy --role-name "$AMPLIFY_ROLE" --policy-name "$POLICY_NAME" 2>/dev/null || true
+        done
+        aws iam delete-role --role-name "$AMPLIFY_ROLE" 2>/dev/null && \
+            echo "  ✓ Amplify role '$AMPLIFY_ROLE' deleted" || true
+    fi
+done
+
+echo ""
+
+# ----------------------------------------------------------------------------
+# Step 5: Delete S3 Buckets
+# ----------------------------------------------------------------------------
+echo "━━━ Step 5: Cleaning up S3 buckets ━━━"
+
+AWS_ACCOUNT=$(aws sts get-caller-identity --query Account --output text 2>/dev/null || echo "")
+for BUCKET in $(aws s3 ls --region "$REGION" 2>/dev/null | awk '{print $3}' | grep -i "bedrock-agentcore"); do
+    echo "  Deleting bucket: $BUCKET"
+    aws s3 rb "s3://$BUCKET" --force --region "$REGION" 2>/dev/null && \
+        echo "  ✓ Deleted" || echo "  ⚠️  Could not delete"
+done
+
+echo ""
+
+# ----------------------------------------------------------------------------
+# Step 6: Delete ECR Repository
+# ----------------------------------------------------------------------------
+echo "━━━ Step 6: Cleaning up ECR ━━━"
+
+# Match the project's own repo prefix (toolkit names it
+# bedrock-agentcore-finroute_agent*), not every bedrock-agentcore repo.
+for REPO in $(aws ecr describe-repositories --region "$REGION" --query 'repositories[?contains(repositoryName, `bedrock-agentcore-finroute_agent`)].repositoryName' --output text 2>/dev/null); do
+    echo "  Deleting ECR repo: $REPO"
+    aws ecr delete-repository --repository-name "$REPO" --force --region "$REGION" 2>/dev/null && \
+        echo "  ✓ Deleted" || echo "  ⚠️  Could not delete"
+done
+
+echo ""
+
+# ----------------------------------------------------------------------------
+# Step 7: Delete CodeBuild Project
+# ----------------------------------------------------------------------------
+echo "━━━ Step 7: Cleaning up CodeBuild ━━━"
+
+# Match the project's own CodeBuild project prefix only, not every bedrock-agentcore project.
+for PROJECT in $(aws codebuild list-projects --region "$REGION" --query 'projects' --output text 2>/dev/null | tr '\t' '\n' | grep "bedrock-agentcore-finroute_agent"); do
+    echo "  Deleting project: $PROJECT"
+    aws codebuild delete-project --name "$PROJECT" --region "$REGION" 2>/dev/null && \
+        echo "  ✓ Deleted" || echo "  ⚠️  Could not delete"
+done
+
+echo ""
+
+# ----------------------------------------------------------------------------
+# Step 8: Delete Amplify App
+# ----------------------------------------------------------------------------
+echo "━━━ Step 8: Cleaning up Amplify ━━━"
+
+# Match the exact app name created by deploy-frontend.sh (APP_NAME="finroute-ui"),
+# not any app whose name merely contains "finroute".
+for APP_ID in $(aws amplify list-apps --region "$REGION" --query "apps[?name=='finroute-ui'].appId" --output text 2>/dev/null); do
+    echo "  Deleting Amplify app: $APP_ID"
+    aws amplify delete-app --app-id "$APP_ID" --region "$REGION" 2>/dev/null && \
+        echo "  ✓ Deleted" || echo "  ⚠️  Could not delete"
+done
+
+echo ""
+
+# ----------------------------------------------------------------------------
+# Step 9: Delete CodeCommit Repository
+# ----------------------------------------------------------------------------
+echo "━━━ Step 9: Cleaning up CodeCommit ━━━"
+
+aws codecommit delete-repository --repository-name "finroute-frontend" --region "$REGION" 2>/dev/null && \
+    echo "  ✓ CodeCommit repo deleted" || echo "  ⚠️  No CodeCommit repo found"
+
+echo ""
+
+# ----------------------------------------------------------------------------
+# Step 10: Delete Secrets Manager entries
+# ----------------------------------------------------------------------------
+echo "━━━ Step 10: Cleaning up Secrets Manager ━━━"
+
+REGION="$REGION" python3 -c "
+import os, boto3
+client = boto3.client('secretsmanager', region_name=os.environ['REGION'])
+try:
+    secrets = client.list_secrets(
+        Filters=[{'Key': 'name', 'Values': ['agentcore-project-credentials']}]
+    )
+    active = [s for s in secrets.get('SecretList', []) if not s.get('DeletedDate')]
+    for secret in active:
+        print(f'  Deleting secret: {secret[\"Name\"]}')
+        client.delete_secret(SecretId=secret['Name'], ForceDeleteWithoutRecovery=True)
+        print(f'  ✓ Deleted')
+    if not active:
+        print('  No project secrets found')
+except Exception as e:
+    print(f'  ⚠️  Could not clean secrets: {e}')
+" 2>/dev/null || echo "  ⚠️  Secrets cleanup skipped"
+
+echo ""
+echo "============================================"
+echo "  ✅ Cleanup Complete!"
+echo "============================================"
+echo ""
+echo "All AWS resources have been removed."
+echo "Local files (.venv, node_modules) are untouched."
+echo ""
