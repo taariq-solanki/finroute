@@ -3,6 +3,7 @@ import Head from "next/head";
 import ChatInput from "../src/components/ChatInput";
 import ChatMessage from "../src/components/ChatMessage";
 import LoginForm from "../src/components/LoginForm";
+import Logo from "../src/components/Logo";
 import {
   signIn,
   signOut,
@@ -29,6 +30,11 @@ const SUGGESTIONS = [
   "Build me a moderate-risk portfolio for $10,000",
 ];
 
+// Dev-only preview: when NEXT_PUBLIC_PREVIEW=1, skip the login gate and seed
+// sample messages so the chat UI can be reviewed locally with no backend.
+// Never set this in a real deployment.
+const PREVIEW = process.env.NEXT_PUBLIC_PREVIEW === "1";
+
 export default function Home() {
   const [messages, setMessages] = useState<ChatMessageType[]>([]);
   const [isStreaming, setIsStreaming] = useState(false);
@@ -38,10 +44,69 @@ export default function Home() {
   const [authChecked, setAuthChecked] = useState(false);
   const [sessionId] = useState(generateSessionId);
   const [rateLimitCountdown, setRateLimitCountdown] = useState<number>(0);
+  const [memoryUsed, setMemoryUsed] = useState(false);
+  const [theme, setTheme] = useState<"light" | "dark">("light");
   const countdownRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
 
+  // Apply + persist theme
   useEffect(() => {
+    const saved = (typeof window !== "undefined" && localStorage.getItem("finroute-theme")) as
+      | "light"
+      | "dark"
+      | null;
+    const initial =
+      saved ||
+      (typeof window !== "undefined" &&
+      window.matchMedia?.("(prefers-color-scheme: dark)").matches
+        ? "dark"
+        : "light");
+    setTheme(initial);
+  }, []);
+
+  useEffect(() => {
+    if (typeof document !== "undefined") {
+      document.documentElement.setAttribute("data-theme", theme);
+      try {
+        localStorage.setItem("finroute-theme", theme);
+      } catch {
+        /* ignore */
+      }
+    }
+  }, [theme]);
+
+  const toggleTheme = () => setTheme((t) => (t === "light" ? "dark" : "light"));
+
+  useEffect(() => {
+    // Dev preview: bypass auth and seed sample messages to review the chat UI.
+    if (PREVIEW) {
+      setLoggedIn(true);
+      setAuthChecked(true);
+      setMessages([
+        {
+          id: "preview-u1",
+          role: "user",
+          content: "Create a monthly budget for $6,000 income",
+          timestamp: new Date(),
+        },
+        {
+          id: "preview-a1",
+          role: "assistant",
+          content:
+            "Here's a **50/30/20** budget for **$6,000/month**:\n\n" +
+            "- **Needs — $3,000 (50%)**: rent, utilities, groceries, transport, insurance\n" +
+            "- **Wants — $1,800 (30%)**: dining out, entertainment, subscriptions\n" +
+            "- **Savings & debt — $1,200 (20%)**: emergency fund, retirement, extra debt payments\n\n" +
+            "A few tips:\n1. Automate the $1,200 to savings on payday.\n" +
+            "2. Keep a 3–6 month emergency fund.\n\n" +
+            "_Educational only — not financial advice._",
+          timestamp: new Date(),
+          routing: { route: "budget", confidence: 0.94 },
+        },
+      ]);
+      return;
+    }
+
     // Check in-memory auth state on mount
     setLoggedIn(isAuthenticated());
     setAuthChecked(true);
@@ -137,6 +202,51 @@ export default function Home() {
     async (content: string) => {
       if (!loggedIn) return;
 
+      // Dev preview: no backend — echo a canned streamed-looking reply so the
+      // input, streaming indicator, and message styling can be reviewed.
+      if (PREVIEW) {
+        const userMsg: ChatMessageType = {
+          id: Date.now().toString(36),
+          role: "user",
+          content,
+          timestamp: new Date(),
+        };
+        const lc = content.toLowerCase();
+        const route: "budget" | "investment" | "both" =
+          /stock|invest|portfolio|share|nvda|tsla|aapl|meta/.test(lc)
+            ? "investment"
+            : /budget|save|saving|spend|expense|debt|income|salary/.test(lc)
+            ? "budget"
+            : "both";
+        const aMsg: ChatMessageType = {
+          id: Date.now().toString(36) + "a",
+          role: "assistant",
+          content: "",
+          timestamp: new Date(),
+          routing: { route, confidence: route === "both" ? 0.58 : 0.92 },
+        };
+        setMessages((prev) => [...prev, userMsg, aMsg]);
+        setIsStreaming(true);
+        const demo =
+          "**Preview mode** — this is a sample reply (no backend connected).\n\n" +
+          "In a live session this is where the streamed answer from the budget or " +
+          "investment agent would appear, routed by Strands Decider 2B.";
+        let i = 0;
+        const timer = setInterval(() => {
+          i += 4;
+          setMessages((prev) => {
+            const u = [...prev];
+            u[u.length - 1] = { ...u[u.length - 1], content: demo.slice(0, i) };
+            return u;
+          });
+          if (i >= demo.length) {
+            clearInterval(timer);
+            setIsStreaming(false);
+          }
+        }, 20);
+        return;
+      }
+
       let accessToken: string;
       try {
         accessToken = await getAccessToken();
@@ -164,6 +274,7 @@ export default function Home() {
 
       setMessages((prev) => [...prev, userMessage, assistantMessage]);
       setIsStreaming(true);
+      setMemoryUsed(false);
 
       sendMessage(
         content,
@@ -202,7 +313,8 @@ export default function Home() {
             return updated;
           });
           setIsStreaming(false);
-        }
+        },
+        () => setMemoryUsed(true)
       );
     },
     [loggedIn, sessionId, startRateLimitCountdown]
@@ -241,15 +353,27 @@ export default function Home() {
         {/* Header */}
         <header className="header">
           <div className="header-brand">
-            <div className="header-logo">FR</div>
+            <div className="header-logo">
+              <Logo size={30} idSuffix="hdr" />
+            </div>
             <div>
               <h1>FinRoute</h1>
               <p>Budget planning &bull; Investment analysis &bull; Smart routing</p>
             </div>
           </div>
-          <button onClick={handleLogout} className="signout-btn">
-            Sign Out
-          </button>
+          <div className="header-actions">
+            <button
+              onClick={toggleTheme}
+              className="theme-toggle"
+              aria-label="Toggle dark mode"
+              title={theme === "light" ? "Dark mode" : "Light mode"}
+            >
+              {theme === "light" ? "🌙" : "☀️"}
+            </button>
+            <button onClick={handleLogout} className="signout-btn">
+              Sign Out
+            </button>
+          </div>
         </header>
 
         {/* Chat Area */}
@@ -278,6 +402,12 @@ export default function Home() {
           {messages.map((msg) => (
             <ChatMessage key={msg.id} message={msg} />
           ))}
+
+          {memoryUsed && (
+            <div className="memory-badge" role="status">
+              💡 Using context from your previous conversations
+            </div>
+          )}
 
           {isStreaming && (
             <div className="streaming">

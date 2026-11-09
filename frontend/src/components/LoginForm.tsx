@@ -1,4 +1,5 @@
 import { useState } from "react";
+import Logo from "./Logo";
 
 interface LoginFormProps {
   onLogin: (username: string, password: string) => Promise<void>;
@@ -24,7 +25,9 @@ export default function LoginForm({ onLogin, error }: LoginFormProps) {
     <div className="login-container">
       <div className="login-card">
         <div className="login-header">
-          <div className="login-logo">FR</div>
+          <div className="login-logo">
+            <Logo size={38} idSuffix="login" />
+          </div>
           <h1>FinRoute</h1>
           <p className="subtitle">
             AI-powered financial planning assistant

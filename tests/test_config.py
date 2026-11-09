@@ -18,8 +18,8 @@ from config import (
 class TestRequiredRegion:
     """Tests for the REQUIRED_REGION constant."""
 
-    def test_required_region_is_eu_north_1(self):
-        assert REQUIRED_REGION == "eu-north-1"
+    def test_required_region_is_us_east_1(self):
+        assert REQUIRED_REGION == "us-east-1"
 
     def test_required_region_is_string(self):
         assert isinstance(REQUIRED_REGION, str)
@@ -53,8 +53,8 @@ class TestGetValidatedRegion:
         mock_client.return_value = mock_sts
 
         result = get_validated_region()
-        assert result == "eu-north-1"
-        mock_client.assert_called_once_with("sts", region_name="eu-north-1")
+        assert result == "us-east-1"
+        mock_client.assert_called_once_with("sts", region_name="us-east-1")
 
     @patch("config.boto3.client")
     def test_exits_on_connection_failure(self, mock_client):
@@ -62,7 +62,7 @@ class TestGetValidatedRegion:
 
         mock_sts = MagicMock()
         mock_sts.get_caller_identity.side_effect = EndpointConnectionError(
-            endpoint_url="https://sts.eu-north-1.amazonaws.com"
+            endpoint_url="https://sts.us-east-1.amazonaws.com"
         )
         mock_client.return_value = mock_sts
 
@@ -95,13 +95,13 @@ class TestCreateBoto3Client:
     @patch("config.boto3.client")
     def test_injects_region_name(self, mock_client):
         create_boto3_client("bedrock")
-        mock_client.assert_called_once_with("bedrock", region_name="eu-north-1")
+        mock_client.assert_called_once_with("bedrock", region_name="us-east-1")
 
     @patch("config.boto3.client")
     def test_passes_additional_kwargs(self, mock_client):
         create_boto3_client("s3", endpoint_url="http://localhost:4566")
         mock_client.assert_called_once_with(
-            "s3", region_name="eu-north-1", endpoint_url="http://localhost:4566"
+            "s3", region_name="us-east-1", endpoint_url="http://localhost:4566"
         )
 
     @patch("config.boto3.client")
@@ -116,7 +116,7 @@ class TestValidateStartup:
     @patch("config._check_guardrail_accessible")
     @patch("config.get_validated_region")
     def test_succeeds_when_checks_pass(self, mock_region, mock_guardrail):
-        mock_region.return_value = "eu-north-1"
+        mock_region.return_value = "us-east-1"
         asyncio.run(validate_startup())
         mock_region.assert_called_once()
         mock_guardrail.assert_called_once()

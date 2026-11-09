@@ -349,6 +349,12 @@ async def create_request_context(
     # Step 3: Create a per-request agent with isolated conversation history
     request_agent = _create_per_request_agent(enhanced_prompt)
 
+    # Signal to the frontend that relevant memory was found and applied, so the UI
+    # can show a "using context from previous conversations" cue. This is a control
+    # marker, not answer content; the SSE client intercepts it and does not render it.
+    if memory_context:
+        yield "[[MEMORY_USED]]"
+
     # Step 4: Stream response with guardrail intervention handling
     full_response = ""
     try:

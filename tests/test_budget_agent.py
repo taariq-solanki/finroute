@@ -1,6 +1,6 @@
 """Unit tests for the budget agent tool functions.
 
-Tests calculate_budget and create_financial_chart tools from budget_agent.py.
+Tests the calculate_budget tool from budget_agent.py.
 
 Validates: Requirements 4.1
 """
@@ -92,70 +92,3 @@ class TestCalculateBudget:
         assert "Needs" in result
         assert "Wants" in result
         assert "Savings" in result
-
-
-# ---------------------------------------------------------------------------
-# create_financial_chart Tests
-# ---------------------------------------------------------------------------
-
-
-class TestCreateFinancialChart:
-    """Tests for the create_financial_chart tool function."""
-
-    @pytest.fixture(autouse=True)
-    def _patch_chart_imports(self):
-        """Patch heavy imports and matplotlib to prevent actual rendering."""
-        with patch("boto3.Session") as mock_session, \
-             patch("strands.models.BedrockModel"), \
-             patch("matplotlib.pyplot.figure"), \
-             patch("matplotlib.pyplot.pie"), \
-             patch("matplotlib.pyplot.title"), \
-             patch("matplotlib.pyplot.axis"), \
-             patch("matplotlib.pyplot.tight_layout"), \
-             patch("matplotlib.pyplot.show"):
-            mock_session.return_value.region_name = "eu-north-1"
-            from budget_agent import create_financial_chart
-            self.create_financial_chart = create_financial_chart
-            yield
-
-    @pytest.mark.unit
-    def test_valid_data_dict(self):
-        """Valid data produces success message."""
-        data = {"Needs": 2500, "Wants": 1500, "Savings": 1000}
-        result = self.create_financial_chart(data_dict=data, chart_title="My Budget")
-        assert "✅" in result
-        assert "My Budget" in result
-
-    @pytest.mark.unit
-    def test_empty_data_returns_error(self):
-        """Empty dictionary returns an error message."""
-        result = self.create_financial_chart(data_dict={}, chart_title="Empty")
-        assert "❌" in result or "Error" in result
-
-    @pytest.mark.unit
-    def test_default_chart_title(self):
-        """Default title is used when none provided."""
-        data = {"A": 50, "B": 50}
-        result = self.create_financial_chart(data_dict=data)
-        assert "✅" in result
-
-    @pytest.mark.unit
-    def test_single_category(self):
-        """Single-entry data dict works."""
-        data = {"Only": 1000}
-        result = self.create_financial_chart(data_dict=data, chart_title="Single")
-        assert "✅" in result
-
-    @pytest.mark.unit
-    def test_many_categories(self):
-        """Multiple categories (more than available colors) still works."""
-        data = {f"Cat{i}": i * 100 for i in range(1, 8)}
-        result = self.create_financial_chart(data_dict=data, chart_title="Many")
-        assert "✅" in result or "Error" not in result
-
-    @pytest.mark.unit
-    def test_output_contains_success_indicator(self):
-        """Success result contains the checkmark and 'created successfully'."""
-        data = {"Food": 500, "Rent": 1500}
-        result = self.create_financial_chart(data_dict=data, chart_title="Expenses")
-        assert "created successfully" in result

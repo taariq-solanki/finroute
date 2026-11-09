@@ -3,6 +3,13 @@ const nextConfig = {
   reactStrictMode: true,
   swcMinify: true,
   async headers() {
+    // Next.js 12 dev mode uses eval() for hot-reload, which a strict
+    // `script-src 'self'` blocks (blank page locally). Allow 'unsafe-eval'
+    // ONLY in development; production keeps the hardened policy (Req 8.4).
+    const isDev = process.env.NODE_ENV !== 'production';
+    const scriptSrc = isDev
+      ? "script-src 'self' 'unsafe-eval'"
+      : "script-src 'self'";
     return [
       {
         source: '/(.*)',
@@ -11,11 +18,11 @@ const nextConfig = {
             key: 'Content-Security-Policy',
             value: [
               "default-src 'self'",
-              "script-src 'self'",
+              scriptSrc,
               "style-src 'self' 'unsafe-inline'",
               "img-src 'self' data:",
               "font-src 'self'",
-              "connect-src 'self' https://cognito-idp.eu-north-1.amazonaws.com https://*.amazonaws.com",
+              "connect-src 'self' https://cognito-idp.us-east-1.amazonaws.com https://*.amazonaws.com",
               "frame-ancestors 'none'",
               "base-uri 'self'",
             ].join('; '),

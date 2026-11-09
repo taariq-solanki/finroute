@@ -153,6 +153,18 @@ echo "━━━ Step 5: deploy-frontend.sh ━━━"
 ./deploy-frontend.sh
 
 # ----------------------------------------------------------------------------
+# Step 6 (optional): CloudWatch observability dashboard for the new runtime
+# ----------------------------------------------------------------------------
+RUNTIME_ID=$(aws bedrock-agentcore-control list-agent-runtimes --region "$REGION" \
+  --query "agentRuntimes[?contains(agentRuntimeName,'finroute')].agentRuntimeId | [0]" \
+  --output text 2>/dev/null)
+if [ -n "$RUNTIME_ID" ] && [ "$RUNTIME_ID" != "None" ] && [ -x ./observability/dashboard.sh ]; then
+  echo "━━━ Step 6: observability dashboard ━━━"
+  ./observability/dashboard.sh "$RUNTIME_ID" "$REGION" || echo "  (dashboard step skipped)"
+  echo "RUNTIME_ID=$RUNTIME_ID" >> "$STATE_FILE"
+fi
+
+# ----------------------------------------------------------------------------
 # Summary
 # ----------------------------------------------------------------------------
 echo ""

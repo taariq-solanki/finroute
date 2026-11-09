@@ -1,10 +1,16 @@
 const ENDPOINT = process.env.NEXT_PUBLIC_AGENTCORE_ENDPOINT || "";
 
+export interface RoutingInfo {
+  route: "budget" | "investment" | "both";
+  confidence: number; // 0..1
+}
+
 export interface ChatMessage {
   id: string;
   role: "user" | "assistant";
   content: string;
   timestamp: Date;
+  routing?: RoutingInfo;
 }
 
 /**
@@ -32,7 +38,12 @@ interface SSEParserConfig {
   onChunk: (accumulatedContent: string) => void;
   onDone: () => void;
   onError: (error: string) => void;
+  onMemoryUsed?: () => void;
 }
+
+// Control marker the backend emits (not answer content) when relevant memory
+// from previous conversations was found and applied to this request.
+const MEMORY_MARKER = "[[MEMORY_USED]]";
 
 /**
  * SSEParser handles Server-Sent Events parsing with correct content preservation.
@@ -86,6 +97,13 @@ class SSEParser {
           this.receivedDone = true;
           this.config.onDone();
           return;
+        }
+
+        // Memory-used control marker: surface via callback, never render as content.
+        // Strip it even if it arrives glued to the first content chunk.
+        if (data.includes(MEMORY_MARKER)) {
+          this.config.onMemoryUsed?.();
+          data = data.split(MEMORY_MARKER).join("");
         }
 
         // Append content and emit cleaned accumulated response
@@ -152,7 +170,8 @@ export async function sendMessage(
   actorId: string,
   onChunk: (chunk: string) => void,
   onDone: () => void,
-  onError: (error: string, wafError?: WafErrorInfo) => void
+  onError: (error: string, wafError?: WafErrorInfo) => void,
+  onMemoryUsed?: () => void
 ): Promise<void> {
   try {
     const response = await fetch(`${ENDPOINT}?qualifier=DEFAULT`, {
@@ -212,6 +231,7 @@ export async function sendMessage(
       onChunk,
       onDone,
       onError,
+      onMemoryUsed,
     });
 
     while (true) {
