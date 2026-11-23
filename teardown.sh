@@ -80,13 +80,17 @@ for R in $REGIONS; do
 
   aws ecr delete-repository --repository-name bedrock-agentcore-finroute_agent --force --region "$R" >/dev/null 2>&1 && echo "  ✓ ECR repo"
 
-  for b in $(aws s3api list-buckets --query "Buckets[?contains(Name,'bedrock-agentcore') && contains(Name,'$R')].Name" --output text 2>/dev/null); do
-    aws s3 rb "s3://$b" --force >/dev/null 2>&1 && echo "  ✓ S3 $b"
+  # The toolkit keeps ONE source bucket per account+region, shared by every agent you
+  # deploy. Remove only this project's objects, never the bucket itself.
+  for b in $(aws s3api list-buckets --query "Buckets[?starts_with(Name,'bedrock-agentcore-codebuild-sources-') && ends_with(Name,'-$R')].Name" --output text 2>/dev/null); do
+    aws s3 rm "s3://$b/finroute_agent/" --recursive >/dev/null 2>&1 && echo "  ✓ S3 objects in $b/finroute_agent/"
   done
 
   aws codebuild delete-project --name bedrock-agentcore-finroute_agent-builder --region "$R" 2>/dev/null && echo "  ✓ codebuild"
 
-  for lg in $(aws logs describe-log-groups --region "$R" --query "logGroups[?contains(logGroupName,'finroute') || contains(logGroupName,'bedrock-agentcore')].logGroupName" --output text 2>/dev/null); do
+  # Match on "finroute" only. Other AgentCore projects in the same account also have
+  # /aws/bedrock-agentcore/... log groups and must not be touched.
+  for lg in $(aws logs describe-log-groups --region "$R" --query "logGroups[?contains(logGroupName,'finroute')].logGroupName" --output text 2>/dev/null); do
     aws logs delete-log-group --log-group-name "$lg" --region "$R" 2>/dev/null && echo "  ✓ log group $lg"
   done
 
@@ -99,7 +103,13 @@ done
 # IAM roles (global namespace, region-suffixed names)
 # ----------------------------------------------------------------------------
 echo "━━━ IAM roles ━━━"
-for role in $(aws iam list-roles --query "Roles[?contains(RoleName,'AmazonBedrockAgentCoreSDKRuntime') || contains(RoleName,'AmazonBedrockAgentCoreSDKCodeBuild')].RoleName" --output text 2>/dev/null); do
+# Exact names only (the CodeBuild role suffix is derived from the agent name, so it is stable).
+ROLES=""
+for R in $REGIONS; do
+  ROLES="$ROLES AmazonBedrockAgentCoreSDKRuntime-$R AmazonBedrockAgentCoreSDKCodeBuild-$R-d1a0fab5a2"
+done
+for role in $ROLES; do
+  aws iam get-role --role-name "$role" >/dev/null 2>&1 || continue
   for p in $(aws iam list-attached-role-policies --role-name "$role" --query "AttachedPolicies[].PolicyArn" --output text 2>/dev/null); do
     aws iam detach-role-policy --role-name "$role" --policy-arn "$p" 2>/dev/null
   done
