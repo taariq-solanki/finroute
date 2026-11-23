@@ -314,7 +314,16 @@ export default function Home() {
           });
           setIsStreaming(false);
         },
-        () => setMemoryUsed(true)
+        () => setMemoryUsed(true),
+        (routing) =>
+          setMessages((prev) => {
+            const updated = [...prev];
+            const last = updated[updated.length - 1];
+            if (last && last.role === "assistant") {
+              updated[updated.length - 1] = { ...last, routing };
+            }
+            return updated;
+          })
       );
     },
     [loggedIn, sessionId, startRateLimitCountdown]

@@ -3,6 +3,8 @@ const ENDPOINT = process.env.NEXT_PUBLIC_AGENTCORE_ENDPOINT || "";
 export interface RoutingInfo {
   route: "budget" | "investment" | "both";
   confidence: number; // 0..1
+  /** True when confidence was below the threshold and the LLM decided instead. */
+  escalated?: boolean;
 }
 
 export interface ChatMessage {
@@ -39,7 +41,11 @@ interface SSEParserConfig {
   onDone: () => void;
   onError: (error: string) => void;
   onMemoryUsed?: () => void;
+  onRouting?: (info: RoutingInfo) => void;
 }
+
+// Routing control marker emitted by the backend: [[ROUTE:<choice>:<confidence>:<act|escalate>]]
+const ROUTE_MARKER_RE = /\[\[ROUTE:(budget|investment|both):([0-9.]+):(act|escalate)\]\]/g;
 
 // Control marker the backend emits (not answer content) when relevant memory
 // from previous conversations was found and applied to this request.
@@ -104,6 +110,19 @@ class SSEParser {
         if (data.includes(MEMORY_MARKER)) {
           this.config.onMemoryUsed?.();
           data = data.split(MEMORY_MARKER).join("");
+        }
+
+        // Routing marker: surface the Decider decision via callback, never render it.
+        ROUTE_MARKER_RE.lastIndex = 0;
+        const routeMatch = ROUTE_MARKER_RE.exec(data);
+        if (routeMatch) {
+          this.config.onRouting?.({
+            route: routeMatch[1] as RoutingInfo["route"],
+            confidence: parseFloat(routeMatch[2]),
+            escalated: routeMatch[3] === "escalate",
+          });
+          ROUTE_MARKER_RE.lastIndex = 0;
+          data = data.replace(ROUTE_MARKER_RE, "");
         }
 
         // Append content and emit cleaned accumulated response
@@ -171,7 +190,8 @@ export async function sendMessage(
   onChunk: (chunk: string) => void,
   onDone: () => void,
   onError: (error: string, wafError?: WafErrorInfo) => void,
-  onMemoryUsed?: () => void
+  onMemoryUsed?: () => void,
+  onRouting?: (info: RoutingInfo) => void
 ): Promise<void> {
   try {
     const response = await fetch(`${ENDPOINT}?qualifier=DEFAULT`, {
@@ -232,6 +252,7 @@ export async function sendMessage(
       onDone,
       onError,
       onMemoryUsed,
+      onRouting,
     });
 
     while (true) {

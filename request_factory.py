@@ -324,8 +324,17 @@ async def create_request_context(
     # and the LLM orchestrator routes on its own. This keeps Decider strictly
     # additive and safe - routing never breaks if the decision model is down.
     routing_hint: str = ""
+    route_marker: str = ""
     try:
         decision = await asyncio.to_thread(route_query, user_message)
+        # Control marker so the UI can show which specialist Decider picked and how
+        # confident it was (including when it escalated to the LLM). Only emitted when
+        # Decider actually answered; never for the unreachable/fallback case.
+        if decision.choice and decision.source == "decider":
+            route_marker = (
+                f"[[ROUTE:{decision.choice}:{decision.confidence:.2f}:"
+                f"{'act' if decision.should_act else 'escalate'}]]"
+            )
         if decision.should_act and decision.choice:
             routing_hint = _build_routing_hint(decision)
             logger.info(
@@ -354,6 +363,8 @@ async def create_request_context(
     # marker, not answer content; the SSE client intercepts it and does not render it.
     if memory_context:
         yield "[[MEMORY_USED]]"
+    if route_marker:
+        yield route_marker
 
     # Step 4: Stream response with guardrail intervention handling
     full_response = ""

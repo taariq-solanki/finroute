@@ -39,6 +39,11 @@ omit = [
     "tests/*",
     ".venv/*",
     "*.ipynb",
+    # Not part of the request path, so excluded from the coverage gate on purpose:
+    # setup-time Cognito/Secrets provisioning (run by setup.sh against real AWS)
+    # and notebook-era console printing helpers.
+    "utils/agentcore_utils.py",
+    "utils/message_formatter.py",
 ]
 
 [tool.coverage.report]

@@ -16,13 +16,25 @@ const ROUTE_META: Record<string, { label: string; emoji: string; cls: string }> 
 export default function ChatMessage({ message }: ChatMessageProps) {
   const isUser = message.role === "user";
   const routing = message.routing;
-  const meta = routing ? ROUTE_META[routing.route] : undefined;
+  // When Decider wasn't confident enough, the LLM chose the specialist: say so.
+  const meta = routing
+    ? routing.escalated
+      ? { label: "Escalated to LLM", emoji: "🧠", cls: "route-escalate" }
+      : ROUTE_META[routing.route]
+    : undefined;
 
   return (
     <div className={`message ${isUser ? "user" : "assistant"}`}>
       {/* Routing visualization — makes the Decider decision visible */}
       {!isUser && routing && meta && (
-        <div className="routing-chip" title="Routed by Strands Decider 2B">
+        <div
+          className="routing-chip"
+          title={
+            routing.escalated
+              ? "Strands Decider 2B was not confident enough, so the LLM chose"
+              : "Routed by Strands Decider 2B"
+          }
+        >
           <span className={`route-dot ${meta.cls}`}>{meta.emoji}</span>
           <span>{meta.label}</span>
           <span className="conf-bar">
