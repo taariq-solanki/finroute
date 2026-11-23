@@ -4,6 +4,8 @@ AI-powered financial assistant built on AWS Bedrock AgentCore with a Next.js fro
 A multi-agent system where an orchestrator routes between a budget agent and an
 investment analysis agent, backed by Bedrock Nova Pro, Cognito auth, memory, and guardrails.
 
+**Demo video:** [FinRoute — Strands Decider 2B hackathon demo](https://www.youtube.com/watch?v=cKOQjSokjSs)
+
 ---
 
 ## Strands Decider 2B — the routing decision
