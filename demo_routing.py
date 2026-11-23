@@ -84,8 +84,8 @@ def run(queries) -> None:
         if d.should_act:
             acted += 1
             total_latency += d.latency_ms  # only count latency on acted routes
-            print(f"  {GREEN}ACT{RESET}  -> route directly to '{d.choice}' "
-                  f"(confidence {d.confidence:.2f}, {d.latency_ms:.0f} ms, no LLM routing call)")
+            print(f"  {GREEN}ACT{RESET}  -> hint '{d.choice}' to the orchestrator "
+                  f"(confidence {d.confidence:.2f}, {d.latency_ms:.0f} ms)")
         else:
             escalated += 1
             print(f"  {YELLOW}ESCALATE{RESET} -> confidence {d.confidence:.2f} below "
@@ -97,8 +97,8 @@ def run(queries) -> None:
           f"| {YELLOW}{escalated} escalated to LLM{RESET}")
     if acted:
         print(f"{DIM}Avg Decider latency on acted routes: "
-              f"{total_latency / max(acted,1):.0f} ms (CPU). Each ACT skips an LLM "
-              f"routing round-trip.{RESET}")
+              f"{total_latency / max(acted,1):.0f} ms (CPU). ACT passes the choice to the "
+              f"orchestrator as a hint; ESCALATE leaves the choice to the LLM.{RESET}")
     print()
 
 

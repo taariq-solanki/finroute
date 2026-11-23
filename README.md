@@ -21,11 +21,11 @@ choice. Decider can. FinRoute uses that confidence to apply an explicit policy:
 
 | Decider confidence | Action |
 |--------------------|--------|
-| `>= 0.75` (ACT)      | Route **directly** to the chosen specialist — no LLM round-trip spent on routing |
+| `>= 0.75` (ACT)      | Pass the chosen specialist to the orchestrator as a routing hint (the LLM still runs the tool call and writes the answer) |
 | `<  0.75` (ESCALATE) | Defer to the full LLM orchestrator to decide (the genuinely ambiguous cases) |
 
-So the fast, cheap decision model handles the clear cases and the LLM is reserved for the hard
-ones. If the Decider server is unreachable, routing safely falls back to the LLM — the decision
+So every request gets a measured confidence: clear cases carry a routing hint to the orchestrator,
+and ambiguous ones are left to the LLM to decide. If the Decider server is unreachable, routing safely falls back to the LLM — the decision
 model is strictly additive and never a single point of failure.
 
 ### Files
