@@ -94,6 +94,10 @@ for R in $REGIONS; do
     aws logs delete-log-group --log-group-name "$lg" --region "$R" 2>/dev/null && echo "  ✓ log group $lg"
   done
 
+  for d in $(aws cloudwatch list-dashboards --region "$R" --dashboard-name-prefix FinRoute- --query "DashboardEntries[].DashboardName" --output text 2>/dev/null); do
+    aws cloudwatch delete-dashboards --region "$R" --dashboard-names "$d" >/dev/null 2>&1 && echo "  ✓ dashboard $d"
+  done
+
   for sn in $(aws secretsmanager list-secrets --region "$R" --query "SecretList[?contains(Name,'agentcore-project-credentials')].Name" --output text 2>/dev/null); do
     aws secretsmanager delete-secret --secret-id "$sn" --force-delete-without-recovery --region "$R" >/dev/null 2>&1 && echo "  ✓ secret $sn"
   done
