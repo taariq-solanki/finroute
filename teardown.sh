@@ -110,6 +110,8 @@ for role in $(aws iam list-roles --query "Roles[?contains(RoleName,'AmazonBedroc
 done
 
 [ -f "$STATE_FILE" ] && rm -f "$STATE_FILE"
+# The toolkit config keeps the deleted runtime's id; remove it so the next deploy creates fresh.
+rm -f "$PROJECT_DIR/.bedrock_agentcore.yaml"
 
 echo ""
 echo "============================================"

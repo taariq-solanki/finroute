@@ -31,6 +31,34 @@ DEPLOY_EC2=1
 
 cd "$PROJECT_DIR"
 
+# Reset the toolkit's generated config. After a teardown it still holds the deleted
+# runtime's agent_id, so the toolkit would try to UPDATE a runtime that no longer exists
+# (ResourceNotFoundException). Starting from a blank config makes it CREATE a new one.
+cat > .bedrock_agentcore.yaml << YAML
+default_agent: finroute_agent
+agents:
+  finroute_agent:
+    name: finroute_agent
+    entrypoint: main.py
+    platform: linux/arm64
+    container_runtime: none
+    aws:
+      execution_role_auto_create: true
+      region: $REGION
+      ecr_auto_create: true
+      network_configuration:
+        network_mode: PUBLIC
+      protocol_configuration:
+        server_protocol: HTTP
+      observability:
+        enabled: true
+    bedrock_agentcore:
+      agent_id: null
+      agent_arn: null
+      agent_session_id: null
+    oauth_configuration: null
+YAML
+
 echo "============================================"
 echo "  FinRoute — Full Redeploy ($REGION)"
 echo "============================================"
@@ -133,7 +161,8 @@ USERDATA
   DECIDER_ENDPOINT="http://$IP:8010/v1/systemone"
   echo "Waiting for Decider server to come up (install + model load, up to ~12 min)..."
   for i in $(seq 1 48); do
-    code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 5 "$DECIDER_ENDPOINT" -X POST -H "content-type: application/json" -d '{}' 2>/dev/null || echo 000)
+    # curl already prints 000 when it cannot connect; do NOT append another 000 on failure.
+    code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 5 "$DECIDER_ENDPOINT" -X POST -H "content-type: application/json" -d '{}' 2>/dev/null || true)
     if [ "$code" != "000" ] && [ -n "$code" ]; then echo "✓ Decider responding (HTTP $code)"; break; fi
     sleep 15
     [ "$i" = "48" ] && echo "⚠️  Decider not up yet; agent will fall back to LLM routing until it is."
