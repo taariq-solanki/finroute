@@ -27,3 +27,7 @@ frontend/tsconfig.tsbuildinfo
 
 # Redeploy state (local only)
 .finroute-deploy-state
+
+# Test artifacts
+.coverage
+htmlcov/
